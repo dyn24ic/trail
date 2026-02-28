@@ -24,6 +24,7 @@ export default function MapContainer() {
   });
   const [viewMode, setViewMode] = useState<'3d' | 'wireframe'>('3d');
   const [focusMode, setFocusMode] = useState(false);
+  const [boxZoomMode, setBoxZoomMode] = useState(false);
   const [dangerZones, setDangerZones] = useState<DangerZone[]>([]);
   const cameraControlsRef = useRef<CameraControls | null>(null);
 
@@ -82,6 +83,13 @@ export default function MapContainer() {
         >
           {focusMode ? '⊕ Active' : '⊕ Focus'}
         </button>
+        <button
+          className={`tb-focus-btn${boxZoomMode ? ' on' : ''}`}
+          onClick={() => setBoxZoomMode(v => !v)}
+          title="Drag to zoom into a region"
+        >
+          {boxZoomMode ? '⬚ Active' : '⬚ Box Zoom'}
+        </button>
         <div className="tb-sep" />
         <div
           className={`layer-toggle${hotspots.status === 'loading' ? ' predicting' : ' load-action'}`}
@@ -100,6 +108,7 @@ export default function MapContainer() {
         layers={layers}
         viewMode={viewMode}
         focusMode={focusMode}
+        boxZoomMode={boxZoomMode}
         dangerZones={dangerZones}
         hotspotData={hotspots.data}
         placementData={hotspots.placement}

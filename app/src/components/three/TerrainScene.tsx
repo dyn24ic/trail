@@ -45,6 +45,7 @@ interface Props {
   };
   viewMode: "3d" | "wireframe";
   focusMode?: boolean;
+  boxZoomMode?: boolean;
   dangerZones?: DangerZone[];
   hotspotData?: HotspotPredictionResponse | null;
   placementData?: PlacementSuggestions | null;
@@ -161,7 +162,7 @@ async function fetchSatTexture(bbox: BBox): Promise<THREE.Texture | null> {
 
 // ── Text sprite ───────────────────────────────────────────────────────────────
 
-function makeTextSprite(text: string, hexColor: string): THREE.Sprite {
+function makeTextSprite(text: string, hexColor: string, scale = 1.0): THREE.Sprite {
   // Render at 4× logical resolution for crisp text at any zoom
   const DPR = 4;
   const PAD_X = 14,
@@ -219,7 +220,7 @@ function makeTextSprite(text: string, hexColor: string): THREE.Sprite {
   });
   const sprite = new THREE.Sprite(mat);
   // World scale uses logical dimensions so size stays consistent
-  sprite.scale.set((logW / logH) * 1.1, 1.1, 1);
+  sprite.scale.set((logW / logH) * 1.1 * scale, 1.1 * scale, 1);
   return sprite;
 }
 
@@ -227,6 +228,7 @@ export default function TerrainScene({
   layers,
   viewMode,
   focusMode,
+  boxZoomMode,
   dangerZones,
   hotspotData,
   placementData,
@@ -238,6 +240,7 @@ export default function TerrainScene({
   const layersRef = useRef(layers);
   const viewModeRef = useRef(viewMode);
   const focusModeRef = useRef(focusMode ?? false);
+  const boxZoomModeRef = useRef(boxZoomMode ?? false);
   const dangerZonesRef = useRef<DangerZone[]>([]);
   const hotspotRef = useRef<HotspotPredictionResponse | null>(null);
   const placementRef = useRef<PlacementSuggestions | null>(null);
@@ -246,6 +249,7 @@ export default function TerrainScene({
   useEffect(() => { layersRef.current = layers; }, [layers]);
   useEffect(() => { viewModeRef.current = viewMode; }, [viewMode]);
   useEffect(() => { focusModeRef.current = focusMode ?? false; }, [focusMode]);
+  useEffect(() => { boxZoomModeRef.current = boxZoomMode ?? false; }, [boxZoomMode]);
   useEffect(() => { dangerZonesRef.current = dangerZones ?? []; }, [dangerZones]);
   useEffect(() => { hotspotRef.current = hotspotData ?? null; }, [hotspotData]);
   useEffect(() => { placementRef.current = placementData ?? null; }, [placementData]);
@@ -542,19 +546,19 @@ export default function TerrainScene({
       const g = addSurfGroup(x, z);
 
       const dot = new THREE.Mesh(
-        new THREE.SphereGeometry(0.09, 8, 8),
+        new THREE.SphereGeometry(0.055, 8, 8),
         new THREE.MeshBasicMaterial({ color: c }),
       );
-      dot.position.y = 0.12;
+      dot.position.y = 0.08;
       g.add(dot);
 
       const mat = new THREE.MeshBasicMaterial({
         color: c,
         transparent: true,
-        opacity: 0.35,
+        opacity: 0.25,
         side: THREE.DoubleSide,
       });
-      const ring = new THREE.Mesh(new THREE.RingGeometry(0.12, 0.18, 14), mat);
+      const ring = new THREE.Mesh(new THREE.RingGeometry(0.075, 0.11, 14), mat);
       ring.position.y = 0.02;
       ring.rotation.x = -Math.PI / 2;
       g.add(ring);
@@ -638,10 +642,10 @@ export default function TerrainScene({
       const g = addSurfGroup(x, z);
 
       const dot = new THREE.Mesh(
-        new THREE.SphereGeometry(0.16, 10, 10),
+        new THREE.SphereGeometry(0.10, 10, 10),
         new THREE.MeshBasicMaterial({ color: inc.color }),
       );
-      dot.position.y = 0.16;
+      dot.position.y = 0.10;
       g.add(dot);
 
       const pulseMat = new THREE.MeshBasicMaterial({
@@ -651,7 +655,7 @@ export default function TerrainScene({
         side: THREE.DoubleSide,
       });
       const pulse = new THREE.Mesh(
-        new THREE.RingGeometry(0.22, 0.34, 18),
+        new THREE.RingGeometry(0.14, 0.22, 18),
         pulseMat,
       );
       pulse.position.y = 0.02;
@@ -794,7 +798,7 @@ export default function TerrainScene({
 
       const stemGeo = new THREE.BufferGeometry().setFromPoints([
         new THREE.Vector3(0, 0, 0),
-        new THREE.Vector3(0, 1.4, 0),
+        new THREE.Vector3(0, 1.1, 0),
       ]);
       g.add(
         new THREE.Line(
@@ -808,10 +812,10 @@ export default function TerrainScene({
       );
 
       const diamond = new THREE.Mesh(
-        new THREE.OctahedronGeometry(0.15, 0),
+        new THREE.OctahedronGeometry(0.10, 0),
         new THREE.MeshBasicMaterial({ color: lm.color }),
       );
-      diamond.position.y = 1.4;
+      diamond.position.y = 1.1;
       g.add(diamond);
 
       const glowMat = new THREE.MeshBasicMaterial({
@@ -821,7 +825,7 @@ export default function TerrainScene({
         side: THREE.DoubleSide,
       });
       const glow = new THREE.Mesh(
-        new THREE.RingGeometry(0.18, 0.28, 16),
+        new THREE.RingGeometry(0.12, 0.19, 16),
         glowMat,
       );
       glow.position.y = 0.02;
@@ -829,7 +833,7 @@ export default function TerrainScene({
       g.add(glow);
 
       const sprite = makeTextSprite(lm.name, lm.colorHex);
-      sprite.position.y = 2.1;
+      sprite.position.y = 1.7;
       g.add(sprite);
 
       landmarkGroups.push(g);
@@ -938,7 +942,7 @@ export default function TerrainScene({
 
         // Label sprite above zone
         const colorHex = "#" + color.toString(16).padStart(6, "0");
-        const label = makeTextSprite(zone.riskLevel.toUpperCase(), colorHex);
+        const label = makeTextSprite(zone.riskLevel.toUpperCase(), colorHex, 0.7);
         label.position.set(x, y + 1.2, z);
         hotspotGroup.add(label);
       });
@@ -1036,7 +1040,7 @@ export default function TerrainScene({
     scene.add(boundaryLine);
 
     // Label sprite positioned above north-centre of boundary
-    const boundaryLabel = makeTextSprite("Yosemite National Park", "#FFD700");
+    const boundaryLabel = makeTextSprite("Yosemite National Park", "#FFD700", 0.6);
     const northCentreY = heightsArray
       ? heightAtMeshPos(0, -hwZ, heightsArray, RES, SZ_W, SZ_H) + 1.8
       : 1.8;
@@ -1068,11 +1072,97 @@ export default function TerrainScene({
       };
     }
 
+    // ── Box-zoom tool ─────────────────────────────────────────────────
+    function startBoxZoomTween(hit: THREE.Vector3, ndcW: number, ndcH: number) {
+      const span = Math.max(ndcW, ndcH);
+      const ZOOM_DIST = THREE.MathUtils.clamp(3.0 / span, 2.5, 18);
+      focusTween = {
+        fromPos: camera.position.clone(),
+        fromTarget: controls.target.clone(),
+        toPos: new THREE.Vector3(hit.x, hit.y + ZOOM_DIST, hit.z + ZOOM_DIST * 0.15),
+        toTarget: hit.clone(),
+        t: 0,
+      };
+    }
+
+    let boxStart: { x: number; y: number } | null = null;
+    let boxOverlay: HTMLDivElement | null = null;
+    let boxDragged = false;
+
     let mouseDownXY = { x: 0, y: 0 };
     const onMouseDown = (e: MouseEvent) => {
       mouseDownXY = { x: e.clientX, y: e.clientY };
+      if (!boxZoomModeRef.current) return;
+
+      boxStart = { x: e.clientX, y: e.clientY };
+      boxDragged = false;
+      controls.enableRotate = false;
+      controls.enablePan = false;
+
+      const parent = canvas!.parentElement;
+      if (parent) {
+        const overlay = document.createElement("div");
+        overlay.id = "bz-overlay";
+        overlay.style.cssText =
+          "position:absolute;pointer-events:none;border:1.5px dashed rgba(0,255,200,0.8);background:rgba(0,255,200,0.05);box-sizing:border-box;";
+        parent.appendChild(overlay);
+        boxOverlay = overlay;
+      }
     };
+
+    const onMouseMove = (e: MouseEvent) => {
+      if (!boxZoomModeRef.current || !boxStart || !boxOverlay) return;
+      boxDragged = true;
+
+      const rect = canvas!.getBoundingClientRect();
+      const x1 = Math.min(boxStart.x, e.clientX) - rect.left;
+      const y1 = Math.min(boxStart.y, e.clientY) - rect.top;
+      const w = Math.abs(e.clientX - boxStart.x);
+      const h = Math.abs(e.clientY - boxStart.y);
+
+      boxOverlay.style.left = `${x1}px`;
+      boxOverlay.style.top = `${y1}px`;
+      boxOverlay.style.width = `${w}px`;
+      boxOverlay.style.height = `${h}px`;
+    };
+
+    const onMouseUp = (e: MouseEvent) => {
+      if (!boxZoomModeRef.current || !boxStart) return;
+
+      if (boxOverlay) {
+        boxOverlay.remove();
+        boxOverlay = null;
+      }
+      controls.enableRotate = true;
+      controls.enablePan = true;
+
+      if (!boxDragged) {
+        boxStart = null;
+        return;
+      }
+
+      const rect = canvas!.getBoundingClientRect();
+      const cx = (boxStart.x + e.clientX) / 2;
+      const cy = (boxStart.y + e.clientY) / 2;
+      const ndcCenter = new THREE.Vector2(
+        ((cx - rect.left) / rect.width) * 2 - 1,
+        -((cy - rect.top) / rect.height) * 2 + 1,
+      );
+      const ndcW = Math.abs(e.clientX - boxStart.x) / rect.width * 2;
+      const ndcH = Math.abs(e.clientY - boxStart.y) / rect.height * 2;
+
+      const ray = new THREE.Raycaster();
+      ray.setFromCamera(ndcCenter, camera);
+      const hits = ray.intersectObject(terrainMesh);
+      if (hits.length > 0) startBoxZoomTween(hits[0].point, ndcW, ndcH);
+
+      boxStart = null;
+      boxDragged = false;
+    };
+
     const onClick = (e: MouseEvent) => {
+      // Skip click-focus if box zoom just completed a drag
+      if (boxZoomModeRef.current && boxDragged) return;
       if (!focusModeRef.current) return;
       const dx = e.clientX - mouseDownXY.x,
         dy = e.clientY - mouseDownXY.y;
@@ -1089,6 +1179,8 @@ export default function TerrainScene({
       if (hits.length > 0) startFocusTween(hits[0].point);
     };
     canvas.addEventListener("mousedown", onMouseDown);
+    canvas.addEventListener("mousemove", onMouseMove);
+    canvas.addEventListener("mouseup", onMouseUp);
     canvas.addEventListener("click", onClick);
 
     // ── Render loop ───────────────────────────────────────────────────
@@ -1269,9 +1361,18 @@ export default function TerrainScene({
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
       canvas.removeEventListener("mousedown", onMouseDown);
+      canvas.removeEventListener("mousemove", onMouseMove);
+      canvas.removeEventListener("mouseup", onMouseUp);
       canvas.removeEventListener("click", onClick);
+      if (boxOverlay) { boxOverlay.remove(); boxOverlay = null; }
     };
   }, []);
 
-  return <canvas ref={canvasRef} className="terrain-canvas" />;
+  return (
+    <canvas
+      ref={canvasRef}
+      className="terrain-canvas"
+      style={boxZoomMode ? { cursor: 'crosshair' } : undefined}
+    />
+  );
 }
