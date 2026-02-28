@@ -12,10 +12,10 @@ export function mountainH(x: number, z: number): number {
   const peak = Math.max(0, 1 - d1 * 1.7) ** 1.8 * 7.8;
 
   const d2 = Math.sqrt(((nx + 0.5) * 1.1) ** 2 + ((nz + 0.1) * 0.9) ** 2);
-  const shoulder = Math.max(0, (1 - d2 * 1.9) ** 2) * 4.5;
+  const shoulder = Math.max(0, 1 - d2 * 1.9) ** 2 * 4.5;
 
   const d3 = Math.sqrt(((nx - 0.55) * 1.2) ** 2 + ((nz - 0.05) * 0.8) ** 2);
-  const eRidge = Math.max(0, (1 - d3 * 2.0) ** 2) * 3.8;
+  const eRidge = Math.max(0, 1 - d3 * 2.0) ** 2 * 3.8;
 
   const valleyZ = Math.max(0, nz - 0.15);
   const valley = valleyZ * 2.2;
@@ -46,7 +46,7 @@ export function yosemiteH(x: number, z: number): number {
 
   const ecX = -0.58, ecZ = -0.38;
   const ecD = Math.sqrt(((nx - ecX) * 1.4) ** 2 + ((nz - ecZ) * 3.2) ** 2);
-  h += Math.max(0, (1 - ecD * 1.7) ** 2) * 4.2;
+  h += Math.max(0, 1 - ecD * 1.7) ** 2 * 4.2;
 
   const hdX = 0.52, hdZ = -0.1;
   const hdD = Math.sqrt(((nx - hdX) * 2.2) ** 2 + ((nz - hdZ) * 2.8) ** 2);
@@ -54,11 +54,11 @@ export function yosemiteH(x: number, z: number): number {
 
   const yfX = -0.05, yfZ = -0.42;
   const yfD = Math.sqrt(((nx - yfX) * 1.3) ** 2 + ((nz - yfZ) * 2.5) ** 2);
-  h += Math.max(0, (1 - yfD * 2.1) ** 2) * 2.8;
+  h += Math.max(0, 1 - yfD * 2.1) ** 2 * 2.8;
 
   const nfX = 0.35, nfZ = 0.38;
   const nfD = Math.sqrt(((nx - nfX) * 1.6) ** 2 + ((nz - nfZ) * 1.8) ** 2);
-  h += Math.max(0, (1 - nfD * 2.0) ** 2) * 2.2;
+  h += Math.max(0, 1 - nfD * 2.0) ** 2 * 2.2;
 
   h += Math.max(0, nx - 0.35) * 2.2;
 
