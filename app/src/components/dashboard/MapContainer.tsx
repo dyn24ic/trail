@@ -3,14 +3,29 @@
 import { useState, useEffect, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import { usePredictHotspots } from '@/lib/hotspots/usePredictHotspots';
+import { useIncidents } from '@/lib/incidents/useIncidents';
 import { YOSEMITE_BBOX } from '@/data/trailBbox';
-import type { DangerZone } from '@/types/backend';
+import type { DangerZone, IncidentSummary } from '@/types/backend';
+import type { IncidentMarker } from '@/types/markers';
 import type { CameraControls } from '@/components/three/TerrainScene';
 
 const TerrainScene = dynamic(() => import('@/components/three/TerrainScene'), {
   ssr: false,
   loading: () => <div className="terrain-canvas" style={{ background: '#040B0B' }} />,
 });
+
+function toIncidentMarker(inc: IncidentSummary): IncidentMarker | null {
+  if (inc.locationLat == null || inc.locationLng == null) return null;
+  const isCritical = ['Triggered', 'Searching'].includes(inc.status);
+  const isWarning  = ['VictimFound', 'Triaged', 'Routed'].includes(inc.status);
+  return {
+    id:       inc.id,
+    lat:      inc.locationLat,
+    lon:      inc.locationLng,
+    color:    isCritical ? 0xFF3B3B : isWarning ? 0xFFD84A : 0x4A9FD4,
+    severity: isCritical ? 'critical' : isWarning ? 'warning' : 'info',
+  };
+}
 
 export default function MapContainer() {
   const [layers, setLayers] = useState({
@@ -29,6 +44,14 @@ export default function MapContainer() {
   const cameraControlsRef = useRef<CameraControls | null>(null);
 
   const hotspots = usePredictHotspots(YOSEMITE_BBOX);
+  const { incidents, loading: incLoading } = useIncidents();
+
+  const liveMarkers: IncidentMarker[] = incidents
+    .map(toIncidentMarker)
+    .filter((m): m is IncidentMarker => m !== null);
+
+  // Remount TerrainScene exactly once when live data first arrives so markers update
+  const sceneKey = incLoading ? 'init' : 'live';
 
   const toggle = (name: keyof typeof layers) => {
     setLayers((prev) => ({ ...prev, [name]: !prev[name] }));
@@ -105,6 +128,7 @@ export default function MapContainer() {
       </div>
 
       <TerrainScene
+        key={sceneKey}
         layers={layers}
         viewMode={viewMode}
         focusMode={focusMode}
@@ -112,6 +136,7 @@ export default function MapContainer() {
         dangerZones={dangerZones}
         hotspotData={hotspots.data}
         placementData={hotspots.placement}
+        incidentMarkers={liveMarkers.length > 0 ? liveMarkers : undefined}
         onControlsReady={(ctrl) => { cameraControlsRef.current = ctrl; }}
       />
 

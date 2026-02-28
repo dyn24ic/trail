@@ -26,6 +26,7 @@ import type {
   HotspotPredictionResponse,
   PlacementSuggestions,
 } from "@/types/hotspots";
+import type { IncidentMarker } from "@/types/markers";
 
 export interface CameraControls {
   zoomIn: () => void;
@@ -50,6 +51,7 @@ interface Props {
   dangerZones?: DangerZone[];
   hotspotData?: HotspotPredictionResponse | null;
   placementData?: PlacementSuggestions | null;
+  incidentMarkers?: IncidentMarker[];
   onControlsReady?: (ctrl: CameraControls) => void;
 }
 
@@ -233,6 +235,7 @@ export default function TerrainScene({
   dangerZones,
   hotspotData,
   placementData,
+  incidentMarkers,
   onControlsReady,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -254,6 +257,8 @@ export default function TerrainScene({
   useEffect(() => { dangerZonesRef.current = dangerZones ?? []; }, [dangerZones]);
   useEffect(() => { hotspotRef.current = hotspotData ?? null; }, [hotspotData]);
   useEffect(() => { placementRef.current = placementData ?? null; }, [placementData]);
+  const incidentMarkersRef = useRef<IncidentMarker[]>(incidentMarkers ?? incidentData);
+  useEffect(() => { incidentMarkersRef.current = incidentMarkers ?? incidentData; }, [incidentMarkers]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -652,7 +657,7 @@ export default function TerrainScene({
       phase: number;
     }[] = [];
 
-    incidentData.forEach((inc) => {
+    incidentMarkersRef.current.forEach((inc) => {
       const { x, z } = latLonToMesh(
         inc.lat,
         inc.lon,
@@ -727,7 +732,7 @@ export default function TerrainScene({
       zoneGroups.push(g);
     }
 
-    incidentData.forEach((inc, i) => {
+    incidentMarkersRef.current.forEach((inc, i) => {
       const { x, z } = latLonToMesh(
         inc.lat,
         inc.lon,

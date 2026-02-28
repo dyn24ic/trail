@@ -3,6 +3,7 @@ package trail.db
 import cats.effect.{IO, Resource}
 import doobie.hikari.HikariTransactor
 import doobie.util.ExecutionContexts
+import cats.implicits.catsSyntaxFlatMapOps
 import doobie.implicits.*
 
 object Database:
@@ -20,7 +21,8 @@ object Database:
     yield xa
 
   def initSchema(xa: HikariTransactor[IO]): IO[Unit] =
-    sql"""CREATE TABLE IF NOT EXISTS incidents (
+    (sql"PRAGMA journal_mode=WAL".query[String].option >>
+     sql"""CREATE TABLE IF NOT EXISTS incidents (
       id               TEXT PRIMARY KEY,
       trigger_type     TEXT NOT NULL,
       trigger_payload  TEXT NOT NULL,
@@ -33,4 +35,4 @@ object Database:
       route            TEXT,
       created_at       TEXT NOT NULL,
       updated_at       TEXT NOT NULL
-    )""".update.run.transact(xa).void
+    )""".update.run).transact(xa).void
