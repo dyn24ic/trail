@@ -37,9 +37,10 @@ export default function MapContainer() {
     hotspots: true,
     osm: false,
   });
-  const [viewMode, setViewMode] = useState<'3d' | 'wireframe'>('3d');
+  const [viewMode, setViewMode] = useState<'3d' | '2d'>('3d');
   const [focusMode, setFocusMode] = useState(false);
   const [boxZoomMode, setBoxZoomMode] = useState(false);
+  const [satStatus, setSatStatus] = useState<'idle' | 'loading' | 'loaded' | 'error'>('idle');
   const [dangerZones, setDangerZones] = useState<DangerZone[]>([]);
   const cameraControlsRef = useRef<CameraControls | null>(null);
 
@@ -96,8 +97,14 @@ export default function MapContainer() {
         ))}
         <div className="tb-sep" />
         <span className="tb-section-lbl">VIEW</span>
-        <button className={`tb-view-btn${viewMode === '3d' ? ' on' : ''}`} onClick={() => setViewMode('3d')}>3D</button>
-        <button className={`tb-view-btn${viewMode === 'wireframe' ? ' on' : ''}`} onClick={() => setViewMode('wireframe')}>Wire</button>
+        <button className={`tb-view-btn${viewMode === '3d' ? ' on' : ''}`} onClick={() => {
+          setViewMode('3d');
+          setLayers(prev => ({ ...prev, osm: false }));
+        }}>3D</button>
+        <button className={`tb-view-btn${viewMode === '2d' ? ' on' : ''}`} onClick={() => {
+          setViewMode('2d');
+          setLayers(prev => ({ ...prev, osm: true }));
+        }}>2D</button>
         <div className="tb-sep" />
         <button
           className={`tb-focus-btn${focusMode ? ' on' : ''}`}
@@ -138,6 +145,7 @@ export default function MapContainer() {
         placementData={hotspots.placement}
         incidentMarkers={liveMarkers.length > 0 ? liveMarkers : undefined}
         onControlsReady={(ctrl) => { cameraControlsRef.current = ctrl; }}
+        onSatStatus={setSatStatus}
       />
 
       {/* Box-zoom toggle — top-right corner of the map */}
@@ -165,6 +173,39 @@ export default function MapContainer() {
         {boxZoomMode ? '⬚ ZOOM ON' : '⬚ BOX ZOOM'}
       </button>
 
+      {/* Satellite loading indicator */}
+      {layers.osm && satStatus === 'loading' && (
+        <div style={{
+          position: 'absolute',
+          top: '50%',
+          left: '50%',
+          transform: 'translate(-50%, -50%)',
+          background: 'rgba(4,11,11,0.88)',
+          border: '1px solid rgba(136,187,255,0.5)',
+          color: '#88bbff',
+          borderRadius: '6px',
+          padding: '10px 18px',
+          fontSize: '12px',
+          fontFamily: 'monospace',
+          letterSpacing: '0.08em',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '10px',
+          pointerEvents: 'none',
+          zIndex: 20,
+          backdropFilter: 'blur(6px)',
+        }}>
+          <span style={{
+            width: '10px', height: '10px', borderRadius: '50%',
+            border: '2px solid rgba(136,187,255,0.3)',
+            borderTopColor: '#88bbff',
+            display: 'inline-block',
+            animation: 'spin 0.9s linear infinite',
+          }} />
+          LOADING SATELLITE IMAGERY
+        </div>
+      )}
+
       <div className="scan-indicator">
         <span className="status-dot"></span>
         LIVE · Yosemite National Park · 37.7459°N 119.5332°W
@@ -189,6 +230,9 @@ export default function MapContainer() {
         <div className="legend-item"><span className="legend-line" style={{ background: 'rgba(74,159,212,0.6)' }}></span>Search Zone</div>
         <div className="legend-item"><span className="legend-dot" style={{ background: '#FFD700' }}></span>Landmark</div>
         <div className="legend-item"><span className="legend-line" style={{ background: '#88BBFF' }}></span>OSM Overlay</div>
+        <div className="legend-item"><span className="legend-line" style={{ background: '#00E87A' }}></span>SAR Alpha Route</div>
+        <div className="legend-item"><span className="legend-line" style={{ background: '#FF9500' }}></span>Ranger 7 Route</div>
+        <div className="legend-item"><span className="legend-line" style={{ background: '#00CFFF' }}></span>Helicopter Arc</div>
       </div>
 
       <div id="source-badge" className="source-badge procedural">Procedural</div>

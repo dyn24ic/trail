@@ -21,7 +21,7 @@ import {
   heightAtMeshPos,
 } from "@/lib/coordMapping";
 import type { ElevationResponse, BBox } from "@/types/elevation";
-import type { DangerZone } from "@/types/backend";
+import type { DangerZone, RouteCompareResponse } from "@/types/backend";
 import type {
   HotspotPredictionResponse,
   PlacementSuggestions,
@@ -45,127 +45,88 @@ interface Props {
     hotspots: boolean;
     osm: boolean;
   };
-  viewMode: "3d" | "wireframe";
+  viewMode: "3d" | "2d";
   focusMode?: boolean;
   boxZoomMode?: boolean;
   dangerZones?: DangerZone[];
   hotspotData?: HotspotPredictionResponse | null;
   placementData?: PlacementSuggestions | null;
-  incidentMarkers?: IncidentMarker[];
+  routeAlpha?: RouteCompareResponse | null;
+  routeRanger?: RouteCompareResponse | null;
   onControlsReady?: (ctrl: CameraControls) => void;
+  onSatStatus?: (status: "loading" | "loaded" | "error") => void;
 }
 
-// ── Satellite tile loading ────────────────────────────────────────────────────
+// ── Satellite image loading ───────────────────────────────────────────────────
+// Stitches Esri World Imagery tiles at zoom 13 (~16×16 tiles for Yosemite bbox).
 
 const SAT_ZOOM = 13;
+const TILE_PX  = 256;
 
-// lat → Web Mercator tile fraction (y increases downward = south)
-function lat2merc(lat: number): number {
+function lonToTileX(lon: number, z: number) {
+  return Math.floor(((lon + 180) / 360) * Math.pow(2, z));
+}
+function latToTileY(lat: number, z: number) {
   const r = (lat * Math.PI) / 180;
-  return (1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2;
+  return Math.floor(((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2) * Math.pow(2, z));
+}
+function tileXToLon(x: number, z: number) { return (x / Math.pow(2, z)) * 360 - 180; }
+function tileYToLat(y: number, z: number) {
+  const n = Math.PI - (2 * Math.PI * y) / Math.pow(2, z);
+  return (180 / Math.PI) * Math.atan(0.5 * (Math.exp(n) - Math.exp(-n)));
 }
 
-// Fetch satellite tiles, stitch, then crop to the exact bbox pixels.
-// Returns a CanvasTexture that maps 1:1 to PlaneGeometry default UVs — no UV math needed.
 async function fetchSatTexture(bbox: BBox): Promise<THREE.Texture | null> {
   try {
-    const z = SAT_ZOOM,
-      n = 2 ** z,
-      TS = 256;
+    const xMin = lonToTileX(bbox.west,  SAT_ZOOM);
+    const xMax = lonToTileX(bbox.east,  SAT_ZOOM);
+    const yMin = latToTileY(bbox.north, SAT_ZOOM);
+    const yMax = latToTileY(bbox.south, SAT_ZOOM);
+    const cols = xMax - xMin + 1, rows = yMax - yMin + 1;
 
-    // Tile range with 1-tile padding so edges are never cut
-    const xMin = Math.floor(((bbox.west + 180) / 360) * n) - 1;
-    const xMax = Math.floor(((bbox.east + 180) / 360) * n) + 1;
-    const yMin = Math.floor(lat2merc(bbox.north) * n) - 1;
-    const yMax = Math.floor(lat2merc(bbox.south) * n) + 1;
+    const stitched = document.createElement('canvas');
+    stitched.width = cols * TILE_PX; stitched.height = rows * TILE_PX;
+    const ctx = stitched.getContext('2d')!;
 
-    const cols = xMax - xMin + 1;
-    const rows = yMax - yMin + 1;
-
-    console.log(
-      `[SAT] zoom=${z} grid=${cols}×${rows} (${cols * rows} tiles)  xMin=${xMin} yMin=${yMin}`,
-    );
-
-    // Stitch all tiles into one canvas
-    const raw = document.createElement("canvas");
-    raw.width = cols * TS;
-    raw.height = rows * TS;
-    const ctx = raw.getContext("2d")!;
-
-    // Esri World Imagery — free, no key, browser CORS ✓, URL: /{z}/{y}/{x}
-    let ok = 0,
-      fail = 0;
     await Promise.all(
-      Array.from({ length: rows * cols }, (_, i) => {
-        const tx = xMin + (i % cols);
-        const ty = yMin + Math.floor(i / cols);
-        const url = `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${ty}/${tx}`;
-        return fetch(url)
-          .then((r) => {
-            if (!r.ok) throw new Error(`${r.status}`);
-            return r.blob();
-          })
-          .then((b) => createImageBitmap(b))
-          .then((bmp) => {
-            ctx.drawImage(bmp, (tx - xMin) * TS, (ty - yMin) * TS);
-            ok++;
-          })
-          .catch((e) => {
-            console.warn(`[SAT] tile z=${z} y=${ty} x=${tx} FAILED:`, e);
-            fail++;
-          });
-      }),
+      Array.from({ length: rows }, (_, ry) =>
+        Array.from({ length: cols }, (_, rx) => {
+          const tx = xMin + rx, ty = yMin + ry;
+          const url = `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${SAT_ZOOM}/${ty}/${tx}`;
+          return fetch(url)
+            .then(r => r.ok ? r.blob() : null)
+            .then(b => b ? createImageBitmap(b) : null)
+            .then(bmp => { if (bmp) ctx.drawImage(bmp, rx * TILE_PX, ry * TILE_PX); })
+            .catch(() => {});
+        })
+      ).flat()
     );
 
-    console.log(
-      `[SAT] fetch done: ${ok} ok, ${fail} failed. Raw canvas: ${raw.width}×${raw.height}px`,
-    );
+    const tileWest = tileXToLon(xMin, SAT_ZOOM), tileEast = tileXToLon(xMax + 1, SAT_ZOOM);
+    const tileNorth = tileYToLat(yMin, SAT_ZOOM), tileSouth = tileYToLat(yMax + 1, SAT_ZOOM);
+    const sw = stitched.width, sh = stitched.height;
+    const cx = Math.floor(((bbox.west  - tileWest)  / (tileEast  - tileWest))  * sw);
+    const cy = Math.floor(((tileNorth  - bbox.north) / (tileNorth - tileSouth)) * sh);
+    const cw = Math.ceil( ((bbox.east  - bbox.west)  / (tileEast  - tileWest))  * sw);
+    const ch = Math.ceil( ((bbox.north - bbox.south) / (tileNorth - tileSouth)) * sh);
 
-    // Pixel coords of the exact bbox edges within the stitched canvas
-    const pxL = (((bbox.west + 180) / 360) * n - xMin) * TS;
-    const pxR = (((bbox.east + 180) / 360) * n - xMin) * TS;
-    const pyT = (lat2merc(bbox.north) * n - yMin) * TS; // north = smaller y (top)
-    const pyB = (lat2merc(bbox.south) * n - yMin) * TS; // south = larger y (bottom)
-
-    const cropW = Math.round(pxR - pxL);
-    const cropH = Math.round(pyB - pyT);
-
-    console.log(
-      `[SAT] crop: pxL=${pxL.toFixed(1)} pxR=${pxR.toFixed(1)} pyT=${pyT.toFixed(1)} pyB=${pyB.toFixed(1)}  → ${cropW}×${cropH}px`,
-    );
-
-    // Crop to exact bbox pixels
-    const crop = document.createElement("canvas");
-    crop.width = cropW;
-    crop.height = cropH;
-    crop
-      .getContext("2d")!
-      .drawImage(
-        raw,
-        Math.round(pxL),
-        Math.round(pyT),
-        cropW,
-        cropH,
-        0,
-        0,
-        cropW,
-        cropH,
-      );
-
-    console.log(`[SAT] texture ready: ${crop.width}×${crop.height}px`);
-
-    // CanvasTexture flipY=true (default): canvas top (north) → texture v=1, canvas bottom (south) → v=0
-    // PlaneGeometry (after rotateX): UV v=0 = south, v=1 = north — perfect 1:1 match
-    return new THREE.CanvasTexture(crop);
+    const out = document.createElement('canvas');
+    out.width = cw; out.height = ch;
+    out.getContext('2d')!.drawImage(stitched, cx, cy, cw, ch, 0, 0, cw, ch);
+    return new THREE.CanvasTexture(out);
   } catch (e) {
-    console.error("[SAT] fetchSatTexture threw:", e);
+    console.error('[SAT] fetchSatTexture threw:', e);
     return null;
   }
 }
 
 // ── Text sprite ───────────────────────────────────────────────────────────────
 
-function makeTextSprite(text: string, hexColor: string, scale = 1.0): THREE.Sprite {
+function makeTextSprite(
+  text: string,
+  hexColor: string,
+  scale = 1.0,
+): THREE.Sprite {
   // Render at 4× logical resolution for crisp text at any zoom
   const DPR = 4;
   const PAD_X = 14,
@@ -235,8 +196,10 @@ export default function TerrainScene({
   dangerZones,
   hotspotData,
   placementData,
-  incidentMarkers,
+  routeAlpha,
+  routeRanger,
   onControlsReady,
+  onSatStatus,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const elevData = useTerrainGrid(YOSEMITE_BBOX, MESH_RES);
@@ -248,17 +211,41 @@ export default function TerrainScene({
   const dangerZonesRef = useRef<DangerZone[]>([]);
   const hotspotRef = useRef<HotspotPredictionResponse | null>(null);
   const placementRef = useRef<PlacementSuggestions | null>(null);
+  const routeAlphaRef = useRef<RouteCompareResponse | null>(null);
+  const routeRangerRef = useRef<RouteCompareResponse | null>(null);
+  const viewModeChangedRef = useRef(false);
 
-  useEffect(() => { elevRef.current = elevData; }, [elevData]);
-  useEffect(() => { layersRef.current = layers; }, [layers]);
-  useEffect(() => { viewModeRef.current = viewMode; }, [viewMode]);
-  useEffect(() => { focusModeRef.current = focusMode ?? false; }, [focusMode]);
-  useEffect(() => { boxZoomModeRef.current = boxZoomMode ?? false; }, [boxZoomMode]);
-  useEffect(() => { dangerZonesRef.current = dangerZones ?? []; }, [dangerZones]);
-  useEffect(() => { hotspotRef.current = hotspotData ?? null; }, [hotspotData]);
-  useEffect(() => { placementRef.current = placementData ?? null; }, [placementData]);
-  const incidentMarkersRef = useRef<IncidentMarker[]>(incidentMarkers ?? incidentData);
-  useEffect(() => { incidentMarkersRef.current = incidentMarkers ?? incidentData; }, [incidentMarkers]);
+  useEffect(() => {
+    elevRef.current = elevData;
+  }, [elevData]);
+  useEffect(() => {
+    layersRef.current = layers;
+  }, [layers]);
+  useEffect(() => {
+    viewModeRef.current = viewMode;
+    viewModeChangedRef.current = true;
+  }, [viewMode]);
+  useEffect(() => {
+    focusModeRef.current = focusMode ?? false;
+  }, [focusMode]);
+  useEffect(() => {
+    boxZoomModeRef.current = boxZoomMode ?? false;
+  }, [boxZoomMode]);
+  useEffect(() => {
+    dangerZonesRef.current = dangerZones ?? [];
+  }, [dangerZones]);
+  useEffect(() => {
+    hotspotRef.current = hotspotData ?? null;
+  }, [hotspotData]);
+  useEffect(() => {
+    placementRef.current = placementData ?? null;
+  }, [placementData]);
+  useEffect(() => {
+    routeAlphaRef.current = routeAlpha ?? null;
+  }, [routeAlpha]);
+  useEffect(() => {
+    routeRangerRef.current = routeRanger ?? null;
+  }, [routeRanger]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -271,10 +258,16 @@ export default function TerrainScene({
     // ── Scene & Camera ────────────────────────────────────────────────
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x040b0b);
-    scene.fog = new THREE.FogExp2(0x040b0b, 0.018);
+    const sceneFog = new THREE.FogExp2(0x040b0b, 0.018);
+    scene.fog = sceneFog;
 
     const camera = new THREE.PerspectiveCamera(50, 2, 0.1, 300);
     camera.position.set(0, 22, 28);
+
+    // Orthographic camera used exclusively in 2D mode
+    const orthoCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 400);
+    orthoCamera.position.set(0, 50, 0);
+    orthoCamera.lookAt(0, 0, 0);
 
     // ── OrbitControls (no auto-rotate) ────────────────────────────────
     const controls = new OrbitControls(camera, canvas);
@@ -287,6 +280,11 @@ export default function TerrainScene({
     controls.maxPolarAngle = Math.PI / 2 - 0.01;
     controls.zoomSpeed = 1.4;
     controls.update();
+    {
+      const pitch = (90 - controls.getPolarAngle() * 180 / Math.PI).toFixed(1);
+      const yaw   = (controls.getAzimuthalAngle() * 180 / Math.PI).toFixed(1);
+      console.log(`[trAIl] INIT 3D load | pitch: ${pitch}° | yaw: ${yaw}°`);
+    }
 
     // Expose camera control functions to the parent
     onControlsReady?.({
@@ -412,15 +410,25 @@ export default function TerrainScene({
         const t = Math.min(1, h / 4.5);
         let r, g, b;
         if (t < 0.05) {
-          r = 0.05; g = 0.09; b = 0.06;
+          r = 0.05;
+          g = 0.09;
+          b = 0.06;
         } else if (t < 0.15) {
-          r = 0.07 + t * 0.25; g = 0.13 + t * 0.4; b = 0.06;
+          r = 0.07 + t * 0.25;
+          g = 0.13 + t * 0.4;
+          b = 0.06;
         } else if (t < 0.35) {
-          r = 0.15 + t * 0.45; g = 0.16 + t * 0.4; b = 0.1 + t * 0.3;
+          r = 0.15 + t * 0.45;
+          g = 0.16 + t * 0.4;
+          b = 0.1 + t * 0.3;
         } else if (t < 0.58) {
-          r = 0.32 + t * 0.35; g = 0.3 + t * 0.28; b = 0.26 + t * 0.22;
+          r = 0.32 + t * 0.35;
+          g = 0.3 + t * 0.28;
+          b = 0.26 + t * 0.22;
         } else if (t < 0.8) {
-          r = 0.48 + t * 0.2; g = 0.46 + t * 0.16; b = 0.44 + t * 0.14;
+          r = 0.48 + t * 0.2;
+          g = 0.46 + t * 0.16;
+          b = 0.44 + t * 0.14;
         } else {
           r = 0.66 + (t - 0.8) * 1.4;
           g = 0.68 + (t - 0.8) * 1.1;
@@ -482,10 +490,18 @@ export default function TerrainScene({
       // Flat bottom cap — same dark base colour, both winding directions
       const b = pos.length / 3;
       pos.push(
-        -SZ_W / 2, SKIRT_FLOOR, -SZ_H / 2,
-         SZ_W / 2, SKIRT_FLOOR, -SZ_H / 2,
-         SZ_W / 2, SKIRT_FLOOR,  SZ_H / 2,
-        -SZ_W / 2, SKIRT_FLOOR,  SZ_H / 2,
+        -SZ_W / 2,
+        SKIRT_FLOOR,
+        -SZ_H / 2,
+        SZ_W / 2,
+        SKIRT_FLOOR,
+        -SZ_H / 2,
+        SZ_W / 2,
+        SKIRT_FLOOR,
+        SZ_H / 2,
+        -SZ_W / 2,
+        SKIRT_FLOOR,
+        SZ_H / 2,
       );
       for (let i = 0; i < 4; i++) col.push(...BASE);
       idx.push(b, b + 1, b + 2, b, b + 2, b + 3); // top face
@@ -493,14 +509,30 @@ export default function TerrainScene({
 
       const geo = new THREE.BufferGeometry();
       geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
-      geo.setAttribute("color",    new THREE.Float32BufferAttribute(col, 3));
+      geo.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
       geo.setIndex(idx);
       geo.computeVertexNormals();
       skirtMesh = new THREE.Mesh(
         geo,
-        new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide }),
+        new THREE.MeshLambertMaterial({
+          vertexColors: true,
+          side: THREE.DoubleSide,
+        }),
       );
       scene.add(skirtMesh);
+    }
+
+    function applyFlatTerrain() {
+      for (let i = 0; i < tPos.count; i++) tPos.setY(i, 0);
+      tGeo.computeVertexNormals();
+      tPos.needsUpdate = true;
+      if (skirtMesh) skirtMesh.visible = false;
+    }
+
+    function applyElevatedTerrain() {
+      if (!heightsArray) heightsArray = buildHeights(null);
+      applyHeights(heightsArray);
+      if (skirtMesh) skirtMesh.visible = true;
     }
 
     heightsArray = buildHeights(null);
@@ -531,16 +563,10 @@ export default function TerrainScene({
     const surfGroups: SurfGroup[] = [];
 
     function repositionSurface() {
-      if (!heightsArray) return;
       surfGroups.forEach(({ wx, wz, group }) => {
-        group.position.y = heightAtMeshPos(
-          wx,
-          wz,
-          heightsArray!,
-          RES,
-          SZ_W,
-          SZ_H,
-        );
+        group.position.y = (heightsArray && !viewModeRef.current.startsWith('2'))
+          ? heightAtMeshPos(wx, wz, heightsArray, RES, SZ_W, SZ_H)
+          : 0;
       });
     }
 
@@ -668,10 +694,10 @@ export default function TerrainScene({
       const g = addSurfGroup(x, z);
 
       const dot = new THREE.Mesh(
-        new THREE.SphereGeometry(0.10, 10, 10),
+        new THREE.SphereGeometry(0.1, 10, 10),
         new THREE.MeshBasicMaterial({ color: inc.color }),
       );
-      dot.position.y = 0.10;
+      dot.position.y = 0.1;
       g.add(dot);
 
       const pulseMat = new THREE.MeshBasicMaterial({
@@ -816,7 +842,12 @@ export default function TerrainScene({
     }
 
     // ── Landmark markers ──────────────────────────────────────────────
-    const landmarkGroups: THREE.Group[] = [];
+    // Key landmarks visible at all zoom levels; rest only when zoomed in (dist < 28)
+    const KEY_LANDMARKS = new Set([
+      'Half Dome', 'El Capitan', 'Yosemite Falls', 'Tuolumne Meadows', 'Hetch Hetchy', 'Tioga Pass',
+    ]);
+
+    const landmarkGroups: { group: THREE.Group; key: boolean }[] = [];
 
     landmarkData.forEach((lm) => {
       const { x, z } = latLonToMesh(lm.lat, lm.lon, YOSEMITE_BBOX, SZ_W, SZ_H);
@@ -838,7 +869,7 @@ export default function TerrainScene({
       );
 
       const diamond = new THREE.Mesh(
-        new THREE.OctahedronGeometry(0.10, 0),
+        new THREE.OctahedronGeometry(0.1, 0),
         new THREE.MeshBasicMaterial({ color: lm.color }),
       );
       diamond.position.y = 1.1;
@@ -862,21 +893,32 @@ export default function TerrainScene({
       sprite.position.y = 1.7;
       g.add(sprite);
 
-      landmarkGroups.push(g);
+      landmarkGroups.push({ group: g, key: KEY_LANDMARKS.has(lm.name) });
     });
 
     // ── Initial surface positioning ───────────────────────────────────
     repositionSurface();
 
     // ── Satellite drape ───────────────────────────────────────────────
+    // zoom-13 tile stitch used for both 2D and 3D.
     const satelliteMat = new THREE.MeshBasicMaterial({ side: THREE.FrontSide });
     let satelliteLoaded = false;
+    let satTexLo: THREE.Texture | null = null;
 
-    fetchSatTexture(YOSEMITE_BBOX).then((tex) => {
-      if (!tex) return;
+    function applySatTex(tex: THREE.Texture) {
+      tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+      tex.needsUpdate = true;
       satelliteMat.map = tex;
       satelliteMat.needsUpdate = true;
       satelliteLoaded = true;
+    }
+
+    onSatStatus?.("loading");
+    fetchSatTexture(YOSEMITE_BBOX).then((tex) => {
+      if (!tex) { onSatStatus?.("error"); return; }
+      satTexLo = tex;
+      applySatTex(tex);
+      onSatStatus?.("loaded");
     });
 
     // ── Hotspot + placement groups ────────────────────────────────────
@@ -924,7 +966,13 @@ export default function TerrainScene({
     function buildHotspotMeshes(zones: HotspotPredictionResponse["hotspots"]) {
       hotspotAnims.length = 0;
       zones.forEach((zone) => {
-        const { x, z } = latLonToMesh(zone.lat, zone.lon, YOSEMITE_BBOX, SZ_W, SZ_H);
+        const { x, z } = latLonToMesh(
+          zone.lat,
+          zone.lon,
+          YOSEMITE_BBOX,
+          SZ_W,
+          SZ_H,
+        );
         const y = surf(x, z);
         const meshRadius = zone.radiusMeters / M_PER_UNIT;
         const color = RISK_COLORS[zone.riskLevel] ?? 0xff8c42;
@@ -968,7 +1016,11 @@ export default function TerrainScene({
 
         // Label sprite above zone
         const colorHex = "#" + color.toString(16).padStart(6, "0");
-        const label = makeTextSprite(zone.riskLevel.toUpperCase(), colorHex, 0.7);
+        const label = makeTextSprite(
+          zone.riskLevel.toUpperCase(),
+          colorHex,
+          0.7,
+        );
         label.position.set(x, y + 1.2, z);
         hotspotGroup.add(label);
       });
@@ -1008,7 +1060,13 @@ export default function TerrainScene({
 
       // Call box suggestions — magenta wireframe box
       pl.callBoxes.forEach((cb) => {
-        const { x, z } = latLonToMesh(cb.lat, cb.lon, YOSEMITE_BBOX, SZ_W, SZ_H);
+        const { x, z } = latLonToMesh(
+          cb.lat,
+          cb.lon,
+          YOSEMITE_BBOX,
+          SZ_W,
+          SZ_H,
+        );
         const y = surf(x, z);
 
         const boxEdges = new THREE.EdgesGeometry(
@@ -1027,13 +1085,157 @@ export default function TerrainScene({
       });
     }
 
+    // ── Route visualization ───────────────────────────────────────────
+    const routeGroup = new THREE.Group();
+    scene.add(routeGroup);
+
+    // Track last-rendered waypoint count to detect changes
+    let prevAlphaWpCount = -1;
+    let prevRangerWpCount = -1;
+
+    function buildRouteMeshes(
+      alpha: RouteCompareResponse | null,
+      ranger: RouteCompareResponse | null,
+    ) {
+      clearGroup(routeGroup);
+
+      // Helper: convert route waypoints to 3D points on terrain
+      function waypointsTo3D(waypoints: RouteCompareResponse['ground']['route']['waypoints']): THREE.Vector3[] {
+        return waypoints.map((wp) => {
+          const { x, z } = latLonToMesh(wp.lat, wp.lon, YOSEMITE_BBOX, SZ_W, SZ_H);
+          const y = surf(x, z) + 0.18;
+          return new THREE.Vector3(x, y, z);
+        });
+      }
+
+      // Helper: draw a ground route tube
+      function drawGroundRoute(pts: THREE.Vector3[], color: number) {
+        if (pts.length < 2) return;
+        const curve = new THREE.CatmullRomCurve3(pts);
+        const tube = new THREE.TubeGeometry(curve, pts.length * 3, 0.04, 6, false);
+        const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.82 });
+        routeGroup.add(new THREE.Mesh(tube, mat));
+      }
+
+      // Helper: draw a helicopter arc
+      function drawHelicopterRoute(
+        fromLat: number, fromLon: number,
+        toLat: number, toLon: number,
+        color: number,
+      ) {
+        const { x: x0, z: z0 } = latLonToMesh(fromLat, fromLon, YOSEMITE_BBOX, SZ_W, SZ_H);
+        const { x: x1, z: z1 } = latLonToMesh(toLat, toLon, YOSEMITE_BBOX, SZ_W, SZ_H);
+        const y0 = surf(x0, z0) + 0.5;
+        const y1 = surf(x1, z1) + 0.5;
+        const apex = new THREE.Vector3((x0 + x1) / 2, Math.max(y0, y1) + 5, (z0 + z1) / 2);
+        const curve = new THREE.CatmullRomCurve3([
+          new THREE.Vector3(x0, y0, z0),
+          apex,
+          new THREE.Vector3(x1, y1, z1),
+        ]);
+        const pts = curve.getPoints(60);
+        const geo = new THREE.BufferGeometry().setFromPoints(pts);
+        const mat = new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.6 });
+        routeGroup.add(new THREE.Line(geo, mat));
+
+        // Dashes along the arc
+        const dashMat = new THREE.LineDashedMaterial({ color, dashSize: 0.3, gapSize: 0.2, opacity: 0.45, transparent: true });
+        const dashLine = new THREE.Line(geo.clone(), dashMat);
+        dashLine.computeLineDistances();
+        routeGroup.add(dashLine);
+      }
+
+      // Helper: draw a marker sphere at a lat/lon
+      function drawMarker(lat: number, lon: number, color: number, radius = 0.14): THREE.Mesh {
+        const { x, z } = latLonToMesh(lat, lon, YOSEMITE_BBOX, SZ_W, SZ_H);
+        const y = surf(x, z) + radius + 0.05;
+        const mesh = new THREE.Mesh(
+          new THREE.SphereGeometry(radius, 10, 10),
+          new THREE.MeshBasicMaterial({ color }),
+        );
+        mesh.position.set(x, y, z);
+        routeGroup.add(mesh);
+
+        // Glow ring on terrain
+        const ringMat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.35, side: THREE.DoubleSide, depthWrite: false });
+        const ring = new THREE.Mesh(new THREE.RingGeometry(radius * 1.4, radius * 2.4, 16), ringMat);
+        ring.rotation.x = -Math.PI / 2;
+        ring.position.set(x, surf(x, z) + 0.05, z);
+        routeGroup.add(ring);
+
+        return mesh;
+      }
+
+      // Victim marker (pulsing red at Half Dome)
+      if (alpha) {
+        const vLat = alpha.request.victim.lat;
+        const vLon = alpha.request.victim.lon;
+        const victimMarker = drawMarker(vLat, vLon, 0xff2222, 0.18);
+        const label = makeTextSprite('⚠ INC-0847', '#FF2222', 0.85);
+        const { x, z } = latLonToMesh(vLat, vLon, YOSEMITE_BBOX, SZ_W, SZ_H);
+        label.position.set(x, surf(x, z) + 1.2, z);
+        routeGroup.add(label);
+        void victimMarker; // referenced in tick via routeGroup for animations
+      }
+
+      // SAR Alpha — ground route (green)
+      if (alpha?.ground.route.waypoints.length) {
+        const pts = waypointsTo3D(alpha.ground.route.waypoints);
+        drawGroundRoute(pts, 0x00e87a);
+        // Start marker
+        const wp0 = alpha.ground.route.waypoints[0];
+        drawMarker(wp0.lat, wp0.lon, 0x00e87a, 0.12);
+        const label = makeTextSprite('SAR Alpha', '#00E87A', 0.75);
+        const { x, z } = latLonToMesh(wp0.lat, wp0.lon, YOSEMITE_BBOX, SZ_W, SZ_H);
+        label.position.set(x, surf(x, z) + 0.9, z);
+        routeGroup.add(label);
+      }
+
+      // Ranger 7 — ground route (amber)
+      if (ranger?.ground.route.waypoints.length) {
+        const pts = waypointsTo3D(ranger.ground.route.waypoints);
+        drawGroundRoute(pts, 0xff9500);
+        const wp0 = ranger.ground.route.waypoints[0];
+        drawMarker(wp0.lat, wp0.lon, 0xff9500, 0.12);
+        const label = makeTextSprite('Ranger 7', '#FF9500', 0.75);
+        const { x, z } = latLonToMesh(wp0.lat, wp0.lon, YOSEMITE_BBOX, SZ_W, SZ_H);
+        label.position.set(x, surf(x, z) + 0.9, z);
+        routeGroup.add(label);
+      }
+
+      // Helicopter arc — use alpha's request coords (cyan if not recommended, red if recommended)
+      if (alpha) {
+        const heliColor = alpha.recommended_type === 'helicopter' ? 0xff3b3b : 0x00cfff;
+        drawHelicopterRoute(
+          alpha.request.responder.lat, alpha.request.responder.lon,
+          alpha.request.victim.lat, alpha.request.victim.lon,
+          heliColor,
+        );
+        const heliLabel = makeTextSprite(
+          alpha.recommended_type === 'helicopter' ? '🚁 H-2 RECOMMENDED' : '🚁 H-2 Standby',
+          alpha.recommended_type === 'helicopter' ? '#FF3B3B' : '#00CFFF',
+          0.75,
+        );
+        const { x: mx, z: mz } = latLonToMesh(
+          (alpha.request.responder.lat + alpha.request.victim.lat) / 2,
+          (alpha.request.responder.lon + alpha.request.victim.lon) / 2,
+          YOSEMITE_BBOX, SZ_W, SZ_H,
+        );
+        heliLabel.position.set(mx, surf(mx, mz) + 5.5, mz);
+        routeGroup.add(heliLabel);
+      }
+    }
+
     // ── Yosemite boundary — hugs terrain, rebuilt when elevation loads ─
     const BSTEPS = 80; // more samples = smoother line on real DEM
-    const hwX = SZ_W / 2, hwZ = SZ_H / 2;
+    const hwX = SZ_W / 2,
+      hwZ = SZ_H / 2;
 
     function terrainEdgePoints(
-      x0: number, z0: number,
-      x1: number, z1: number,
+      x0: number,
+      z0: number,
+      x1: number,
+      z1: number,
     ): THREE.Vector3[] {
       return Array.from({ length: BSTEPS + 1 }, (_, i) => {
         const t = i / BSTEPS;
@@ -1047,17 +1249,22 @@ export default function TerrainScene({
     }
 
     const boundaryLineMat = new THREE.LineBasicMaterial({
-      color: 0xffd700, transparent: true, opacity: 0.85,
+      color: 0xffd700,
+      transparent: true,
+      opacity: 0.85,
     });
-    const boundaryLine = new THREE.Line(new THREE.BufferGeometry(), boundaryLineMat);
+    const boundaryLine = new THREE.Line(
+      new THREE.BufferGeometry(),
+      boundaryLineMat,
+    );
     scene.add(boundaryLine);
 
     function rebuildBoundary() {
       const pts = [
-        ...terrainEdgePoints(-hwX, -hwZ,  hwX, -hwZ), // north
-        ...terrainEdgePoints( hwX, -hwZ,  hwX,  hwZ), // east
-        ...terrainEdgePoints( hwX,  hwZ, -hwX,  hwZ), // south
-        ...terrainEdgePoints(-hwX,  hwZ, -hwX, -hwZ), // west
+        ...terrainEdgePoints(-hwX, -hwZ, hwX, -hwZ), // north
+        ...terrainEdgePoints(hwX, -hwZ, hwX, hwZ), // east
+        ...terrainEdgePoints(hwX, hwZ, -hwX, hwZ), // south
+        ...terrainEdgePoints(-hwX, hwZ, -hwX, -hwZ), // west
       ];
       boundaryLine.geometry.dispose();
       boundaryLine.geometry = new THREE.BufferGeometry().setFromPoints(pts);
@@ -1093,19 +1300,24 @@ export default function TerrainScene({
     // Raycast all 4 corners of the selection rect, compute world bounding box,
     // then calculate exact camera height so the area fills the screen.
     function startBoxZoomTween(
-      sx: number, sy: number, // screen start (mousedown)
-      ex: number, ey: number, // screen end   (mouseup)
+      sx: number,
+      sy: number, // screen start (mousedown)
+      ex: number,
+      ey: number, // screen end   (mouseup)
       rect: DOMRectReadOnly,
     ) {
-      const toNDC = (px: number, py: number) => new THREE.Vector2(
-        ((px - rect.left) / rect.width) * 2 - 1,
-        -((py - rect.top) / rect.height) * 2 + 1,
-      );
+      const toNDC = (px: number, py: number) =>
+        new THREE.Vector2(
+          ((px - rect.left) / rect.width) * 2 - 1,
+          -((py - rect.top) / rect.height) * 2 + 1,
+        );
 
       // Raycast the 4 corners of the drawn box to the terrain
       const corners = [
-        toNDC(sx, sy), toNDC(ex, sy),
-        toNDC(sx, ey), toNDC(ex, ey),
+        toNDC(sx, sy),
+        toNDC(ex, sy),
+        toNDC(sx, ey),
+        toNDC(ex, ey),
       ];
       const ray = new THREE.Raycaster();
       const pts: THREE.Vector3[] = [];
@@ -1127,15 +1339,19 @@ export default function TerrainScene({
       // Solve for d so the region exactly fills the screen (with 10% padding)
       const fovRad = (camera.fov * Math.PI) / 180;
       const tanHalfFov = Math.tan(fovRad / 2);
-      const distForHeight = (size.z / 2 * 1.1) / tanHalfFov;
-      const distForWidth  = (size.x / 2 * 1.1) / (tanHalfFov * camera.aspect);
+      const distForHeight = ((size.z / 2) * 1.1) / tanHalfFov;
+      const distForWidth = ((size.x / 2) * 1.1) / (tanHalfFov * camera.aspect);
       const ZOOM_DIST = Math.max(distForHeight, distForWidth, 1.5);
 
       focusTween = {
         fromPos: camera.position.clone(),
         fromTarget: controls.target.clone(),
         // Nearly top-down: tiny z offset to avoid gimbal flip
-        toPos: new THREE.Vector3(center.x, center.y + ZOOM_DIST, center.z + ZOOM_DIST * 0.04),
+        toPos: new THREE.Vector3(
+          center.x,
+          center.y + ZOOM_DIST,
+          center.z + ZOOM_DIST * 0.04,
+        ),
         toTarget: new THREE.Vector3(center.x, center.y, center.z),
         t: 0,
       };
@@ -1185,10 +1401,17 @@ export default function TerrainScene({
     const onMouseUp = (e: MouseEvent) => {
       if (!boxStart) return;
 
-      if (boxOverlay) { boxOverlay.remove(); boxOverlay = null; }
+      if (boxOverlay) {
+        boxOverlay.remove();
+        boxOverlay = null;
+      }
       controls.enabled = true;
 
-      if (boxDragged && Math.abs(e.clientX - boxStart.x) > 8 && Math.abs(e.clientY - boxStart.y) > 8) {
+      if (
+        boxDragged &&
+        Math.abs(e.clientX - boxStart.x) > 8 &&
+        Math.abs(e.clientY - boxStart.y) > 8
+      ) {
         const rect = canvas!.getBoundingClientRect();
         startBoxZoomTween(boxStart.x, boxStart.y, e.clientX, e.clientY, rect);
       }
@@ -1229,7 +1452,51 @@ export default function TerrainScene({
       if (!startT) startT = ts;
       const t = (ts - startT) / 1000;
       const L = layersRef.current;
-      const wf = viewModeRef.current === "wireframe";
+      const is2D = viewModeRef.current === "2d";
+
+      // On view mode switch: flatten/restore terrain, tween camera
+      if (viewModeChangedRef.current) {
+        viewModeChangedRef.current = false;
+        if (is2D) {
+          applyFlatTerrain();
+          repositionSurface();
+          {
+            const pitch = (90 - controls.getPolarAngle() * 180 / Math.PI).toFixed(1);
+            const yaw   = (controls.getAzimuthalAngle() * 180 / Math.PI).toFixed(1);
+            console.log(`[trAIl] SWITCH → 2D | pitch: ${pitch}° | yaw: ${yaw}°`);
+          }
+          focusTween = {
+            fromPos: camera.position.clone(),
+            fromTarget: controls.target.clone(),
+            toPos: new THREE.Vector3(controls.target.x, 38, controls.target.z + 0.001),
+            toTarget: controls.target.clone(),
+            t: 0,
+          };
+        } else {
+          applyElevatedTerrain();
+          rebuildSkirt();
+          repositionSurface();
+          {
+            const pitch = (90 - controls.getPolarAngle() * 180 / Math.PI).toFixed(1);
+            const yaw   = (controls.getAzimuthalAngle() * 180 / Math.PI).toFixed(1);
+            console.log(`[trAIl] SWITCH → 3D | pitch: ${pitch}° | yaw: ${yaw}°`);
+          }
+          // Flush accumulated OrbitControls damping state (sphericalDelta, panOffset)
+          // so damping residue from 2D mode doesn't drift the camera back overhead.
+          const fromPos3D = camera.position.clone();
+          const fromTarget3D = controls.target.clone();
+          controls.enableDamping = false;
+          controls.update();
+          controls.enableDamping = true;
+          focusTween = {
+            fromPos: fromPos3D,
+            fromTarget: fromTarget3D,
+            toPos: new THREE.Vector3(0, 22, 28),
+            toTarget: new THREE.Vector3(0, 1.5, 0),
+            t: 0,
+          };
+        }
+      }
 
       // Arrow key panning
       if (keys.size > 0) {
@@ -1268,10 +1535,12 @@ export default function TerrainScene({
       ) {
         prevElevSource = elev.source;
         heightsArray = buildHeights(elev);
-        applyHeights(heightsArray);
-        rebuildSkirt();
-        rebuildBoundary();
-        repositionSurface();
+        if (!is2D) {
+          applyHeights(heightsArray);
+          rebuildSkirt();
+          rebuildBoundary();
+          repositionSurface();
+        }
         const badge = document.getElementById("source-badge");
         if (badge) {
           badge.className = `source-badge ${elev.source}`;
@@ -1284,35 +1553,49 @@ export default function TerrainScene({
         }
       }
 
-      // Material: satellite drape > wireframe > normal elevation colours
-      if (L.osm && satelliteLoaded) {
+      // 2D mode: lock camera to near-top-down, disable tilt; kill fog so ortho cam isn't darkened
+      controls.maxPolarAngle = is2D ? 0.08 : Math.PI / 2 - 0.01;
+      controls.minPolarAngle = is2D ? 0.0  : 0;
+      scene.fog = is2D ? null : sceneFog;
+
+      // Material: satellite drape (always in 2D) > normal elevation colours
+      if ((L.osm || is2D) && satelliteLoaded) {
         if (terrainMesh.material !== satelliteMat) {
           terrainMesh.material = satelliteMat;
         }
-        wireMat.visible = wf;
+        wireMat.visible = false;
       } else {
         if (terrainMesh.material !== terrainMat) {
           terrainMesh.material = terrainMat;
         }
-        terrainMat.wireframe = wf;
-        terrainMat.vertexColors = !wf;
-        terrainMat.color.set(wf ? 0x003322 : 0xffffff);
-        wireMat.visible = wf;
+        terrainMat.wireframe = false;
+        terrainMat.vertexColors = true;
+        terrainMat.color.set(0xffffff);
+        wireMat.visible = false;
       }
 
       // Lazy-add backend danger zones when data arrives
       addBackendZones();
 
       // Layer visibility
-      zoneGroups.forEach((g) => { g.visible = L.zones; });
-      backendZoneGroups.forEach((g) => { g.visible = L.zones; });
-      landmarkGroups.forEach((g) => { g.visible = L.landmarks; });
-
+      zoneGroups.forEach((g) => {
+        g.visible = L.zones;
+      });
+      backendZoneGroups.forEach((g) => {
+        g.visible = L.zones;
+      });
       // Scale all surface markers proportionally to camera distance
-      // so labels & dots stay readable when zoomed out and uncluttered when zoomed in
       const dist = camera.position.distanceTo(controls.target);
-      const markerScale = THREE.MathUtils.clamp(dist / 28, 0.12, 2.5);
-      surfGroups.forEach(({ group }) => { group.scale.setScalar(markerScale); });
+      landmarkGroups.forEach(({ group, key }) => {
+        group.visible = L.landmarks && (key || dist < 12);
+      });
+
+      const markerScale = is2D
+        ? THREE.MathUtils.clamp(dist / 80, 0.03, 0.55)
+        : THREE.MathUtils.clamp(dist / 28, 0.05, 2.5);
+      surfGroups.forEach(({ group }) => {
+        group.scale.setScalar(markerScale);
+      });
 
       // Sensor pulse
       sensorAnims.forEach(({ ring, mat, phase, dot }) => {
@@ -1356,6 +1639,15 @@ export default function TerrainScene({
       hotspotGroup.visible = L.hotspots;
       placementGroup.visible = L.hotspots;
 
+      // Route meshes — rebuild when route data changes
+      const alphaWpCount = routeAlphaRef.current?.ground.route.waypoints.length ?? 0;
+      const rangerWpCount = routeRangerRef.current?.ground.route.waypoints.length ?? 0;
+      if (alphaWpCount !== prevAlphaWpCount || rangerWpCount !== prevRangerWpCount) {
+        prevAlphaWpCount = alphaWpCount;
+        prevRangerWpCount = rangerWpCount;
+        buildRouteMeshes(routeAlphaRef.current, routeRangerRef.current);
+      }
+
       // Pulse hotspot fill discs
       if (L.hotspots) {
         hotspotAnims.forEach(({ mat, phase, base }) => {
@@ -1388,7 +1680,24 @@ export default function TerrainScene({
         if (camera.position.y < floor) camera.position.y = floor;
       }
 
-      renderer.render(scene, camera);
+      if (is2D) {
+        // Sync ortho camera: centre on orbit target, frustum from persp camera distance
+        const rect = canvas!.getBoundingClientRect();
+        const aspect = rect.width / rect.height;
+        const tanHalfFov = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
+        const dist = camera.position.distanceTo(controls.target);
+        const halfV = dist * tanHalfFov;
+        orthoCamera.left   = -halfV * aspect;
+        orthoCamera.right  =  halfV * aspect;
+        orthoCamera.top    =  halfV;
+        orthoCamera.bottom = -halfV;
+        orthoCamera.position.set(controls.target.x, 50, controls.target.z);
+        orthoCamera.lookAt(controls.target.x, 0, controls.target.z);
+        orthoCamera.updateProjectionMatrix();
+        renderer.render(scene, orthoCamera);
+      } else {
+        renderer.render(scene, camera);
+      }
     }
 
     const ro = new ResizeObserver(resize);
@@ -1407,7 +1716,10 @@ export default function TerrainScene({
       canvas.removeEventListener("mousemove", onMouseMove);
       canvas.removeEventListener("mouseup", onMouseUp);
       canvas.removeEventListener("click", onClick);
-      if (boxOverlay) { boxOverlay.remove(); boxOverlay = null; }
+      if (boxOverlay) {
+        boxOverlay.remove();
+        boxOverlay = null;
+      }
     };
   }, []);
 
@@ -1415,7 +1727,7 @@ export default function TerrainScene({
     <canvas
       ref={canvasRef}
       className="terrain-canvas"
-      style={boxZoomMode ? { cursor: 'crosshair' } : undefined}
+      style={boxZoomMode ? { cursor: "crosshair" } : undefined}
     />
   );
 }
