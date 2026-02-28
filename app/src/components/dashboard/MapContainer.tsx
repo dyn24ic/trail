@@ -15,6 +15,7 @@ export default function MapContainer() {
     incidents: true,
     zones: true,
     landmarks: true,
+    osm: false,
   });
   const [viewMode, setViewMode] = useState<'3d' | 'wireframe'>('3d');
 
@@ -52,6 +53,7 @@ export default function MapContainer() {
             ['incidents', 'incidents', 'var(--db-red)'],
             ['zones',     'zones',     'var(--db-blue)'],
             ['landmarks', 'landmarks', '#FFD700'],
+            ['osm',       'OSM map',   '#88BBFF'],
           ] as const).map(([key, label, color]) => (
             <div
               key={key}
@@ -90,6 +92,7 @@ export default function MapContainer() {
         <div className="legend-item"><span className="legend-dot" style={{ background: 'var(--db-yellow)' }}></span>Incident · Warning</div>
         <div className="legend-item"><span className="legend-line" style={{ background: 'rgba(74,159,212,0.6)' }}></span>Search Zone</div>
         <div className="legend-item"><span className="legend-dot" style={{ background: '#FFD700' }}></span>Landmark</div>
+        <div className="legend-item"><span className="legend-line" style={{ background: '#88BBFF' }}></span>OSM Overlay</div>
       </div>
 
       <div id="source-badge" className="source-badge procedural">Procedural</div>

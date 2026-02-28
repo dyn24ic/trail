@@ -298,13 +298,19 @@ body {
 .page-content {
   position: relative;
   z-index: 10;
-  background: var(--bg);
+  background: transparent; /* Was var(--bg) */
+  pointer-events: none; /* Let clicks pass through empty spaces if needed, but we usually want text selectable */
 }
+.page-content > * { pointer-events: auto; }
 
 /* FEATURE SECTION */
 .section-features {
   padding: 120px 52px;
-  background: #050C14;
+  background: transparent;
+  display: flex;
+  flex-direction: column;
+  max-width: 1400px;
+  margin: 0 auto;
 }
 .section-header {
   margin-bottom: 60px;
@@ -312,6 +318,7 @@ body {
   flex-direction: column;
   gap: 16px;
   opacity: 0;
+  max-width: 600px; /* Constrain header width */
 }
 .section-tag {
   font-family: 'Barlow Condensed', sans-serif;
@@ -325,22 +332,28 @@ body {
 
 .features-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
   gap: 24px;
+  /* Constrain grid width to left side */
+  max-width: 65%;
+}
+@media (max-width: 1024px) {
+  .features-grid { max-width: 100%; }
 }
 
 .feat-card {
-  background: rgba(255,255,255,0.03);
-  border: 1px solid rgba(255,255,255,0.05);
+  background: rgba(5, 12, 20, 0.65); /* Darker semi-transparent background for readability */
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255,255,255,0.08);
   padding: 40px;
   border-radius: 4px;
   opacity: 0;
   transition: transform 0.2s, background 0.2s;
 }
 .feat-card:hover {
-  background: rgba(255,255,255,0.06);
+  background: rgba(5, 12, 20, 0.85);
   transform: translateY(-4px);
-  border-color: rgba(255,255,255,0.1);
+  border-color: rgba(255,255,255,0.15);
 }
 .feat-card::after { display: none; } /* Remove bottom line effect */
 
@@ -396,7 +409,12 @@ body {
 /* STAGE SECTION */
 .section-stages {
   padding: 120px 52px;
-  background: linear-gradient(to bottom, #050C14, #030A10);
+  background: transparent;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end; /* Align to right to show drone path on left/center */
+  max-width: 1400px;
+  margin: 0 auto;
 }
 .stages-title {
   font-family: var(--font-exo2), sans-serif;
@@ -407,6 +425,8 @@ body {
   line-height: 1.2;
   color: #fff;
   opacity: 0;
+  text-align: right;
+  align-self: flex-end;
 }
 .stages-title span { color: var(--amber); }
 
@@ -415,25 +435,37 @@ body {
   flex-direction: column;
   gap: 60px;
   position: relative;
-  border-left: 2px solid rgba(255,255,255,0.1);
-  margin-left: 20px;
-  padding-left: 40px;
-  max-width: 800px;
+  /* Move border to right side for right alignment */
+  border-right: 2px solid rgba(255,255,255,0.1);
+  padding-right: 40px;
+  margin-right: 20px;
+  max-width: 600px;
+  align-items: flex-end;
 }
 .stage-item {
   position: relative;
-  background: transparent;
-  padding: 0;
+  background: rgba(3, 10, 16, 0.6);
+  backdrop-filter: blur(8px);
+  padding: 32px;
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.05);
   display: block;
   opacity: 0;
   transform: translateY(20px);
+  text-align: right; /* Text aligned right */
+  width: 100%;
 }
-.stage-item:hover { background: transparent; }
+.stage-item:hover { 
+  background: rgba(3, 10, 16, 0.85);
+  border-color: rgba(255,255,255,0.15);
+}
 
 .stage-num {
   position: absolute;
-  left: -61px;
-  top: 0;
+  /* Right side alignment */
+  right: -61px;
+  left: auto;
+  top: 32px;
   width: 40px;
   height: 40px;
   background: var(--bg);
