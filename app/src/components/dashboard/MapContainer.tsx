@@ -8,6 +8,9 @@ import { YOSEMITE_BBOX } from '@/data/trailBbox';
 import type { DangerZone, IncidentSummary } from '@/types/backend';
 import type { IncidentMarker } from '@/types/markers';
 import type { CameraControls } from '@/components/three/TerrainScene';
+import { useHybridRoute } from '@/hooks/useHybridRoute';
+import RouteAnalysisPanel from './RouteAnalysisPanel';
+import type { RoutingMode } from './LeafletMapView';
 
 // ── Coordinate utilities ───────────────────────────────────────────────────
 
@@ -88,6 +91,11 @@ const TerrainScene = dynamic(() => import('@/components/three/TerrainScene'), {
   loading: () => <div className="terrain-canvas" style={{ background: '#040B0B' }} />,
 });
 
+const LeafletMapView = dynamic(() => import('./LeafletMapView'), {
+  ssr: false,
+  loading: () => <div style={{ width: '100%', height: '100%', background: '#040B0B' }} />,
+});
+
 function toIncidentMarker(inc: IncidentSummary): IncidentMarker | null {
   if (inc.locationLat == null || inc.locationLng == null) return null;
   const isCritical = ['Triggered', 'Searching'].includes(inc.status);
@@ -105,6 +113,29 @@ interface MapContainerProps {
   leftOpen?: boolean;
   rightOpen?: boolean;
 }
+
+// ── Toolbar button styles (shared) ─────────────────────────────────────────
+const tbBtnBase: React.CSSProperties = {
+  background: 'none',
+  border: '1px solid rgba(0,255,200,0.2)',
+  color: '#7ab8b0',
+  cursor: 'pointer',
+  fontFamily: 'monospace',
+  fontSize: '11px',
+  padding: '4px 8px',
+  borderRadius: '3px',
+  letterSpacing: '0.04em',
+  transition: 'all 0.15s',
+  width: '100%',
+  textAlign: 'left' as const,
+};
+
+const tbBtnOn: React.CSSProperties = {
+  ...tbBtnBase,
+  background: 'rgba(0,255,200,0.12)',
+  border: '1px solid rgba(0,255,200,0.6)',
+  color: '#00ffc8',
+};
 
 export default function MapContainer({ leftOpen = false, rightOpen = false }: MapContainerProps) {
   const lp = leftOpen ? 320 : 0;
@@ -124,23 +155,33 @@ export default function MapContainer({ leftOpen = false, rightOpen = false }: Ma
   const [boxZoomMode, setBoxZoomMode] = useState(false);
   const [satStatus, setSatStatus] = useState<'idle' | 'loading' | 'loaded' | 'error'>('idle');
   const [dangerZones, setDangerZones] = useState<DangerZone[]>([]);
+  const [routingMode, setRoutingMode] = useState<RoutingMode>('view');
+  const [severity, setSeverity] = useState(3);
+  const [showAnalysis, setShowAnalysis] = useState(false);
+  const [elevSource, setElevSource] = useState<string>('loading');
   const cameraControlsRef = useRef<CameraControls | null>(null);
 
   const hotspots = usePredictHotspots(YOSEMITE_BBOX);
-  const { incidents, loading: incLoading } = useIncidents();
-
-  const liveMarkers: IncidentMarker[] = incidents
-    .map(toIncidentMarker)
-    .filter((m): m is IncidentMarker => m !== null);
-
-  // Remount TerrainScene whenever the incident list changes (new incident or status update)
-  const sceneKey = incidents.length === 0 && incLoading
-    ? 'init'
-    : incidents.map((i: IncidentSummary) => `${i.id}:${i.status}`).join(',');
+  const {
+    ambulancePos,
+    victimPos,
+    hybridRoute,
+    status: routeStatus,
+    error: routeError,
+    setAmbulance,
+    setVictim,
+    computeRoute,
+    reset: resetRoute,
+  } = useHybridRoute();
 
   const toggle = (name: keyof typeof layers) => {
     setLayers((prev) => ({ ...prev, [name]: !prev[name] }));
   };
+
+  // Show analysis panel when route is computed
+  useEffect(() => {
+    if (hybridRoute) setShowAnalysis(true);
+  }, [hybridRoute]);
 
   // Fetch backend terrain danger zones for the Yosemite bounding box
   useEffect(() => {
@@ -163,6 +204,9 @@ export default function MapContainer({ leftOpen = false, rightOpen = false }: Ma
     ['landmarks', 'Landmarks', '#FFD700'],
     ['osm',       'Satellite', '#88BBFF'],
   ];
+
+  const canCompute = !!ambulancePos && !!victimPos && routeStatus !== 'computing';
+  const isComputing = routeStatus === 'computing';
 
   return (
     <div className="map-container" style={{ position: 'absolute', inset: 0, '--lp': `${lp}px`, '--rp': `${rp}px` } as React.CSSProperties}>
@@ -216,51 +260,215 @@ export default function MapContainer({ leftOpen = false, rightOpen = false }: Ma
               ? 'Hotspots ✓'
               : 'Load Hotspots'}
         </div>
+
+        {/* ── Route Planner section ────────────────────────────── */}
+        <div className="tb-sep" />
+        <span className="tb-section-lbl">ROUTE</span>
+
+        {/* Ambulance button */}
+        <button
+          style={routingMode === 'set-ambulance' ? tbBtnOn : tbBtnBase}
+          onClick={() => {
+            setRoutingMode(prev => prev === 'set-ambulance' ? 'view' : 'set-ambulance');
+            if (viewMode !== '2d') setViewMode('2d');
+          }}
+          title="Click map to set ambulance position"
+        >
+          🚑 {ambulancePos ? '✓ Ambul.' : 'Set Ambul.'}
+        </button>
+
+        {/* Victim button */}
+        <button
+          style={routingMode === 'set-victim' ? tbBtnOn : tbBtnBase}
+          onClick={() => {
+            setRoutingMode(prev => prev === 'set-victim' ? 'view' : 'set-victim');
+            if (viewMode !== '2d') setViewMode('2d');
+          }}
+          title="Click map to set victim position"
+        >
+          🧍 {victimPos ? '✓ Victim' : 'Set Victim'}
+        </button>
+
+        {/* Severity row */}
+        <div style={{ display: 'flex', gap: '2px', width: '100%' }}>
+          {[1, 2, 3, 4, 5].map((s) => (
+            <button
+              key={s}
+              onClick={() => setSeverity(s)}
+              style={{
+                flex: 1,
+                padding: '3px 0',
+                background: severity === s ? 'rgba(239,68,68,0.2)' : 'none',
+                border: `1px solid ${severity === s ? '#ef4444' : 'rgba(0,255,200,0.15)'}`,
+                color: severity === s ? '#ef4444' : '#7ab8b0',
+                cursor: 'pointer',
+                fontFamily: 'monospace',
+                fontSize: '10px',
+                borderRadius: '2px',
+              }}
+              title={`Severity ${s}`}
+            >
+              {s}
+            </button>
+          ))}
+        </div>
+
+        {/* Compute button */}
+        <button
+          style={{
+            ...tbBtnBase,
+            opacity: canCompute ? 1 : 0.4,
+            cursor: canCompute ? 'pointer' : 'not-allowed',
+            background: canCompute ? 'rgba(0,255,200,0.06)' : 'none',
+            borderColor: canCompute ? 'rgba(0,255,200,0.4)' : 'rgba(0,255,200,0.1)',
+            color: canCompute ? '#00ffc8' : '#7ab8b0',
+          }}
+          onClick={() => {
+            if (canCompute) {
+              setRoutingMode('view');
+              computeRoute(severity);
+            }
+          }}
+          disabled={!canCompute}
+        >
+          {isComputing ? '⟳ Computing…' : '▶ Compute Route'}
+        </button>
+
+        {/* Reset button */}
+        {(ambulancePos || victimPos || hybridRoute) && (
+          <button
+            style={{ ...tbBtnBase, color: '#ef4444', borderColor: 'rgba(239,68,68,0.3)' }}
+            onClick={() => {
+              resetRoute();
+              setRoutingMode('view');
+              setShowAnalysis(false);
+            }}
+          >
+            ↺ Reset
+          </button>
+        )}
+
+        {/* Error message */}
+        {routeStatus === 'error' && (
+          <div style={{ fontSize: '10px', color: '#ef4444', padding: '2px 0', lineHeight: 1.3 }}>
+            ✕ Route failed
+          </div>
+        )}
       </div>
 
-      <TerrainScene
-        key={sceneKey}
-        layers={layers}
-        viewMode={viewMode}
-        focusMode={focusMode}
-        boxZoomMode={boxZoomMode}
-        dangerZones={dangerZones}
-        hotspotData={hotspots.data}
-        placementData={hotspots.placement}
-        incidentMarkers={liveMarkers.length > 0 ? liveMarkers : undefined}
-        onControlsReady={(ctrl) => { cameraControlsRef.current = ctrl; }}
-        onSatStatus={setSatStatus}
-        onCenterUpdate={(lat, lon, elevM) => setCenter({ lat, lon, elevM })}
-      />
+      {/* ── 3D Terrain (always mounted, hidden in 2D mode) ───────────────── */}
+      <div style={{ display: viewMode === '3d' ? 'block' : 'none', position: 'absolute', inset: 0 }}>
+        <TerrainScene
+          layers={layers}
+          viewMode={viewMode}
+          focusMode={focusMode}
+          boxZoomMode={boxZoomMode}
+          dangerZones={dangerZones}
+          hotspotData={hotspots.data}
+          placementData={hotspots.placement}
+          activeRoute={hybridRoute?.mountainRoute ?? null}
+          onControlsReady={(ctrl) => { cameraControlsRef.current = ctrl; }}
+          onSatStatus={setSatStatus}
+          onCenterUpdate={(lat, lon, elevM) => setCenter({ lat, lon, elevM })}
+          onElevSource={setElevSource}
+        />
+      </div>
 
-      {/* Box-zoom toggle — top-right corner of the map */}
-      <button
-        onClick={() => setBoxZoomMode(v => !v)}
-        title="Drag to zoom into a region"
-        style={{
+      {/* ── 2D Leaflet Map ───────────────────────────────────────────────── */}
+      {viewMode === '2d' && (
+        <div style={{ position: 'absolute', inset: 0, zIndex: 1 }}>
+          <LeafletMapView
+            mode={routingMode}
+            ambulancePos={ambulancePos}
+            victimPos={victimPos}
+            hybridRoute={hybridRoute}
+            onAmbulanceSet={(pos) => {
+              setAmbulance(pos);
+              setRoutingMode('view');
+            }}
+            onVictimSet={(pos) => {
+              setVictim(pos);
+              setRoutingMode('view');
+            }}
+          />
+        </div>
+      )}
+
+      {/* ── Route analysis panel ─────────────────────────────────────────── */}
+      {hybridRoute && showAnalysis && (
+        <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 800 }}>
+          <div style={{ pointerEvents: 'auto' }}>
+            <RouteAnalysisPanel
+              hybridRoute={hybridRoute}
+              onDismiss={() => setShowAnalysis(false)}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Computing spinner overlay */}
+      {isComputing && (
+        <div style={{
           position: 'absolute',
-          top: '12px',
-          right: `${rp + 12}px`,
-          transition: 'right 0.3s cubic-bezier(0.4,0,0.2,1)',
-          padding: '6px 12px',
-          background: boxZoomMode ? 'rgba(0,255,200,0.18)' : 'rgba(4,11,11,0.75)',
-          border: `1.5px solid ${boxZoomMode ? 'rgba(0,255,200,0.9)' : 'rgba(0,255,200,0.3)'}`,
-          color: boxZoomMode ? '#00ffc8' : '#7ab8b0',
-          borderRadius: '4px',
-          fontSize: '11px',
+          top: '50%',
+          left: '50%',
+          transform: 'translate(-50%, -50%)',
+          background: 'rgba(4,11,11,0.92)',
+          border: '1px solid rgba(0,255,200,0.4)',
+          color: '#00ffc8',
+          borderRadius: '8px',
+          padding: '14px 24px',
+          fontSize: '12px',
           fontFamily: 'monospace',
-          letterSpacing: '0.05em',
-          cursor: 'pointer',
-          backdropFilter: 'blur(4px)',
-          zIndex: 10,
-          userSelect: 'none',
-        }}
-      >
-        {boxZoomMode ? '⬚ ZOOM ON' : '⬚ BOX ZOOM'}
-      </button>
+          letterSpacing: '0.08em',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '12px',
+          zIndex: 850,
+          backdropFilter: 'blur(8px)',
+          pointerEvents: 'none',
+        }}>
+          <span style={{
+            width: '12px', height: '12px', borderRadius: '50%',
+            border: '2px solid rgba(0,255,200,0.3)',
+            borderTopColor: '#00ffc8',
+            display: 'inline-block',
+            animation: 'spin 0.9s linear infinite',
+          }} />
+          COMPUTING OPTIMAL ROUTE…
+        </div>
+      )}
+
+      {/* Box-zoom toggle — top-right corner of the map (3D only) */}
+      {viewMode === '3d' && (
+        <button
+          onClick={() => setBoxZoomMode(v => !v)}
+          title="Drag to zoom into a region"
+          style={{
+            position: 'absolute',
+            top: '12px',
+            right: `${rp + 12}px`,
+            transition: 'right 0.3s cubic-bezier(0.4,0,0.2,1)',
+            padding: '6px 12px',
+            background: boxZoomMode ? 'rgba(0,255,200,0.18)' : 'rgba(4,11,11,0.75)',
+            border: `1.5px solid ${boxZoomMode ? 'rgba(0,255,200,0.9)' : 'rgba(0,255,200,0.3)'}`,
+            color: boxZoomMode ? '#00ffc8' : '#7ab8b0',
+            borderRadius: '4px',
+            fontSize: '11px',
+            fontFamily: 'monospace',
+            letterSpacing: '0.05em',
+            cursor: 'pointer',
+            backdropFilter: 'blur(4px)',
+            zIndex: 10,
+            userSelect: 'none',
+          }}
+        >
+          {boxZoomMode ? '⬚ ZOOM ON' : '⬚ BOX ZOOM'}
+        </button>
+      )}
 
       {/* Satellite loading indicator */}
-      {layers.osm && satStatus === 'loading' && (
+      {layers.osm && satStatus === 'loading' && viewMode === '3d' && (
         <div style={{
           position: 'absolute',
           top: '50%',
@@ -297,41 +505,47 @@ export default function MapContainer({ leftOpen = false, rightOpen = false }: Ma
         LIVE · Yosemite National Park · 37.7459°N 119.5332°W
       </div>
 
-      <div className="map-hint">
-        🖱 scroll / pinch to zoom &nbsp;·&nbsp; drag to orbit &nbsp;·&nbsp; ↑↓←→ to pan
-      </div>
+      {viewMode === '3d' && (
+        <>
+          <div className="map-hint">
+            🖱 scroll / pinch to zoom &nbsp;·&nbsp; drag to orbit &nbsp;·&nbsp; ↑↓←→ to pan
+          </div>
 
-      <div className="map-coords">
-        {center ? (
-          <>
-            {toDMS(center.lat, true)}&nbsp;&nbsp;{toDMS(center.lon, false)}<br />
-            Elev: {center.elevM}m&nbsp;&nbsp;&nbsp;MSL<br />
-            Grid: {latLonToMGRS(center.lat, center.lon).replace(/ /g, '\u00a0')}
-          </>
-        ) : (
-          <>
-            37°44&apos;45&quot;N&nbsp;&nbsp;119°31&apos;59&quot;W<br />
-            Elev: —<br />
-            Grid: —
-          </>
-        )}
-      </div>
+          <div className="map-coords">
+            {center ? (
+              <>
+                {toDMS(center.lat, true)}&nbsp;&nbsp;{toDMS(center.lon, false)}<br />
+                Elev: {center.elevM}m&nbsp;&nbsp;&nbsp;MSL<br />
+                Grid: {latLonToMGRS(center.lat, center.lon).replace(/ /g, '\u00a0')}
+              </>
+            ) : (
+              <>
+                37°44&apos;45&quot;N&nbsp;&nbsp;119°31&apos;59&quot;W<br />
+                Elev: —<br />
+                Grid: —
+              </>
+            )}
+          </div>
 
-      <div className="map-overlay">
-        <div className="overlay-title">Map Legend</div>
-        <div className="legend-item"><span className="legend-dot" style={{ background: 'var(--db-green)' }}></span>Sensor · Nominal</div>
-        <div className="legend-item"><span className="legend-dot" style={{ background: 'var(--db-amber)' }}></span>Drone · Active</div>
-        <div className="legend-item"><span className="legend-dot" style={{ background: 'var(--db-red)' }}></span>Incident · Critical</div>
-        <div className="legend-item"><span className="legend-dot" style={{ background: 'var(--db-yellow)' }}></span>Incident · Warning</div>
-        <div className="legend-item"><span className="legend-line" style={{ background: 'rgba(74,159,212,0.6)' }}></span>Search Zone</div>
-        <div className="legend-item"><span className="legend-dot" style={{ background: '#FFD700' }}></span>Landmark</div>
-        <div className="legend-item"><span className="legend-line" style={{ background: '#88BBFF' }}></span>OSM Overlay</div>
-        <div className="legend-item"><span className="legend-line" style={{ background: '#00E87A' }}></span>SAR Alpha Route</div>
-        <div className="legend-item"><span className="legend-line" style={{ background: '#FF9500' }}></span>Ranger 7 Route</div>
-        <div className="legend-item"><span className="legend-line" style={{ background: '#00CFFF' }}></span>Helicopter Arc</div>
-      </div>
+          <div className="map-overlay">
+            <div className="overlay-title">Map Legend</div>
+            <div className="legend-item"><span className="legend-dot" style={{ background: 'var(--db-green)' }}></span>Sensor · Nominal</div>
+            <div className="legend-item"><span className="legend-dot" style={{ background: 'var(--db-amber)' }}></span>Drone · Active</div>
+            <div className="legend-item"><span className="legend-dot" style={{ background: 'var(--db-red)' }}></span>Incident · Critical</div>
+            <div className="legend-item"><span className="legend-dot" style={{ background: 'var(--db-yellow)' }}></span>Incident · Warning</div>
+            <div className="legend-item"><span className="legend-line" style={{ background: 'rgba(74,159,212,0.6)' }}></span>Search Zone</div>
+            <div className="legend-item"><span className="legend-dot" style={{ background: '#FFD700' }}></span>Landmark</div>
+            <div className="legend-item"><span className="legend-line" style={{ background: '#88BBFF' }}></span>OSM Overlay</div>
+            <div className="legend-item"><span className="legend-line" style={{ background: '#22d3ee' }}></span>Road (Ambulance)</div>
+            <div className="legend-item"><span className="legend-line" style={{ background: '#22c55e' }}></span>Mountain (Low)</div>
+            <div className="legend-item"><span className="legend-line" style={{ background: '#ef4444' }}></span>Mountain (High Risk)</div>
+          </div>
+        </>
+      )}
 
-      <div id="source-badge" className="source-badge procedural">Procedural</div>
+      <div id="source-badge" className={`source-badge ${elevSource === 'opentopography' ? 'opentopo' : elevSource === 'usgs' ? 'usgs' : elevSource === 'loading' ? 'loading' : 'procedural'}`}>
+        {elevSource === 'opentopography' ? 'OpenTopo DEM' : elevSource === 'usgs' ? 'USGS DEM' : elevSource === 'loading' ? 'Loading…' : 'Procedural'}
+      </div>
     </div>
   );
 }

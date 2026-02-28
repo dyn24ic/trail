@@ -9,13 +9,19 @@ export function useTerrainGrid(bbox: BBox, res: number): ElevationResponse | nul
   useEffect(() => {
     const key = `elevation:${bbox.south}:${bbox.north}:${bbox.west}:${bbox.east}:${res}`;
 
-    // Check sessionStorage cache
+    // Check sessionStorage cache — skip procedural entries so real API data
+    // is fetched once an OpenTopography key becomes available.
     if (typeof sessionStorage !== 'undefined') {
       const cached = sessionStorage.getItem(key);
       if (cached) {
         try {
-          setData(JSON.parse(cached));
-          return;
+          const parsed: ElevationResponse = JSON.parse(cached);
+          if (parsed.source !== 'procedural') {
+            setData(parsed);
+            return;
+          }
+          // Procedural data cached — discard and re-fetch so real API is tried
+          sessionStorage.removeItem(key);
         } catch {
           // ignore corrupt cache
         }
@@ -27,7 +33,8 @@ export function useTerrainGrid(bbox: BBox, res: number): ElevationResponse | nul
       .then((r) => r.json())
       .then((json: ElevationResponse) => {
         setData(json);
-        if (typeof sessionStorage !== 'undefined') {
+        // Only persist real elevation data — procedural is fast to regenerate
+        if (json.source !== 'procedural' && typeof sessionStorage !== 'undefined') {
           try {
             sessionStorage.setItem(key, JSON.stringify(json));
           } catch {

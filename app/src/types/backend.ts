@@ -170,6 +170,21 @@ export interface BackendHealthResponse {
   openweather_configured: boolean;
 }
 
+export interface LatLon {
+  lat: number;
+  lon: number;
+}
+
+export interface HybridRoute {
+  roadPath: LatLon[];
+  stopPoint: LatLon;
+  mountainRoute: RouteCalculateResponse;
+  roadEtaMinutes: number;
+  totalEtaMinutes: number;
+  weatherPenaltyApplied: boolean;
+  penaltyReason: string;
+}
+
 // ── Scala incident types ──────────────────────────────────────────────────────
 
 export type IncidentStatus =
