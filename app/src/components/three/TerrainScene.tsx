@@ -46,6 +46,7 @@ interface Props {
   };
   viewMode: "3d" | "wireframe";
   focusMode?: boolean;
+  boxZoomMode?: boolean;
   dangerZones?: DangerZone[];
   hotspotData?: HotspotPredictionResponse | null;
   placementData?: PlacementSuggestions | null;
@@ -228,6 +229,7 @@ export default function TerrainScene({
   layers,
   viewMode,
   focusMode,
+  boxZoomMode,
   dangerZones,
   hotspotData,
   placementData,
@@ -239,6 +241,7 @@ export default function TerrainScene({
   const layersRef = useRef(layers);
   const viewModeRef = useRef(viewMode);
   const focusModeRef = useRef(focusMode ?? false);
+  const boxZoomModeRef = useRef(boxZoomMode ?? false);
   const dangerZonesRef = useRef<DangerZone[]>([]);
   const hotspotRef = useRef<HotspotPredictionResponse | null>(null);
   const placementRef = useRef<PlacementSuggestions | null>(null);
@@ -247,6 +250,7 @@ export default function TerrainScene({
   useEffect(() => { layersRef.current = layers; }, [layers]);
   useEffect(() => { viewModeRef.current = viewMode; }, [viewMode]);
   useEffect(() => { focusModeRef.current = focusMode ?? false; }, [focusMode]);
+  useEffect(() => { boxZoomModeRef.current = boxZoomMode ?? false; }, [boxZoomMode]);
   useEffect(() => { dangerZonesRef.current = dangerZones ?? []; }, [dangerZones]);
   useEffect(() => { hotspotRef.current = hotspotData ?? null; }, [hotspotData]);
   useEffect(() => { placementRef.current = placementData ?? null; }, [placementData]);
@@ -277,12 +281,6 @@ export default function TerrainScene({
     controls.maxDistance = 80;
     controls.maxPolarAngle = Math.PI / 2 - 0.01;
     controls.zoomSpeed = 1.4;
-    // Disable right-click pan — right-click drag is used for box-zoom
-    controls.mouseButtons = {
-      LEFT: THREE.MOUSE.ROTATE,
-      MIDDLE: THREE.MOUSE.DOLLY,
-      RIGHT: THREE.MOUSE.ROTATE,
-    };
     controls.update();
 
     // Expose camera control functions to the parent
@@ -433,7 +431,7 @@ export default function TerrainScene({
     }
 
     // ── Terrain skirt ─────────────────────────────────────────────────
-    const SKIRT_FLOOR = -1.5;
+    const SKIRT_FLOOR = -4.5;
     let skirtMesh: THREE.Mesh | null = null;
 
     function rebuildSkirt() {
@@ -442,8 +440,11 @@ export default function TerrainScene({
         skirtMesh.geometry.dispose();
       }
 
-      const pos: number[] = [],
-        idx: number[] = [];
+      const pos: number[] = [];
+      const col: number[] = [];
+      const idx: number[] = [];
+      // Dark earthy base colour for the bottom of the walls + cap
+      const BASE = [0.04, 0.07, 0.05] as const;
 
       function addEdge(getVI: (i: number) => number) {
         const base = pos.length / 3;
@@ -452,7 +453,12 @@ export default function TerrainScene({
           const x = tPos.getX(vi),
             y = tPos.getY(vi),
             z = tPos.getZ(vi);
-          pos.push(x, y, z, x, SKIRT_FLOOR, z);
+          // top vertex — inherit terrain edge colour from vCol
+          pos.push(x, y, z);
+          col.push(vCol[vi * 3], vCol[vi * 3 + 1], vCol[vi * 3 + 2]);
+          // bottom vertex — dark base
+          pos.push(x, SKIRT_FLOOR, z);
+          col.push(...BASE);
         }
         for (let i = 0; i < RES - 1; i++) {
           const t0 = base + i * 2,
@@ -468,23 +474,26 @@ export default function TerrainScene({
       addEdge((i) => i * RES); // west  (col=0)
       addEdge((i) => i * RES + (RES - 1)); // east  (col=RES-1)
 
-      // Bottom cap
+      // Flat bottom cap — same dark base colour, both winding directions
       const b = pos.length / 3;
       pos.push(
         -SZ_W / 2, SKIRT_FLOOR, -SZ_H / 2,
-        SZ_W / 2,  SKIRT_FLOOR, -SZ_H / 2,
-        SZ_W / 2,  SKIRT_FLOOR,  SZ_H / 2,
+         SZ_W / 2, SKIRT_FLOOR, -SZ_H / 2,
+         SZ_W / 2, SKIRT_FLOOR,  SZ_H / 2,
         -SZ_W / 2, SKIRT_FLOOR,  SZ_H / 2,
       );
-      idx.push(b, b + 1, b + 2, b, b + 2, b + 3);
+      for (let i = 0; i < 4; i++) col.push(...BASE);
+      idx.push(b, b + 1, b + 2, b, b + 2, b + 3); // top face
+      idx.push(b, b + 2, b + 1, b, b + 3, b + 2); // bottom face (reverse)
 
       const geo = new THREE.BufferGeometry();
       geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+      geo.setAttribute("color",    new THREE.Float32BufferAttribute(col, 3));
       geo.setIndex(idx);
       geo.computeVertexNormals();
       skirtMesh = new THREE.Mesh(
         geo,
-        new THREE.MeshLambertMaterial({ color: 0x0a1510 }),
+        new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide }),
       );
       scene.add(skirtMesh);
     }
@@ -1013,51 +1022,42 @@ export default function TerrainScene({
       });
     }
 
-    // ── Yosemite Valley boundary ──────────────────────────────────────
-    const BSTEPS = 60; // samples per edge
-    function edgePoints(
-      x0: number,
-      z0: number,
-      x1: number,
-      z1: number,
+    // ── Yosemite boundary — hugs terrain, rebuilt when elevation loads ─
+    const BSTEPS = 80; // more samples = smoother line on real DEM
+    const hwX = SZ_W / 2, hwZ = SZ_H / 2;
+
+    function terrainEdgePoints(
+      x0: number, z0: number,
+      x1: number, z1: number,
     ): THREE.Vector3[] {
       return Array.from({ length: BSTEPS + 1 }, (_, i) => {
         const t = i / BSTEPS;
         const ex = x0 + (x1 - x0) * t;
         const ez = z0 + (z1 - z0) * t;
         const ey = heightsArray
-          ? heightAtMeshPos(ex, ez, heightsArray, RES, SZ_W, SZ_H) + 0.35
-          : 0.35;
+          ? heightAtMeshPos(ex, ez, heightsArray, RES, SZ_W, SZ_H) + 0.28
+          : 0.28;
         return new THREE.Vector3(ex, ey, ez);
       });
     }
 
-    const hwX = SZ_W / 2,
-      hwZ = SZ_H / 2;
-    const boundaryPts = [
-      ...edgePoints(-hwX, -hwZ, hwX, -hwZ), // north edge
-      ...edgePoints(hwX, -hwZ, hwX, hwZ), // east edge
-      ...edgePoints(hwX, hwZ, -hwX, hwZ), // south edge
-      ...edgePoints(-hwX, hwZ, -hwX, -hwZ), // west edge
-    ];
-    const boundaryGeo = new THREE.BufferGeometry().setFromPoints(boundaryPts);
-    const boundaryLine = new THREE.Line(
-      boundaryGeo,
-      new THREE.LineBasicMaterial({
-        color: 0xffd700,
-        transparent: true,
-        opacity: 0.85,
-      }),
-    );
+    const boundaryLineMat = new THREE.LineBasicMaterial({
+      color: 0xffd700, transparent: true, opacity: 0.85,
+    });
+    const boundaryLine = new THREE.Line(new THREE.BufferGeometry(), boundaryLineMat);
     scene.add(boundaryLine);
 
-    // Label sprite positioned above north-centre of boundary
-    const boundaryLabel = makeTextSprite("Yosemite National Park", "#FFD700", 0.6);
-    const northCentreY = heightsArray
-      ? heightAtMeshPos(0, -hwZ, heightsArray, RES, SZ_W, SZ_H) + 1.8
-      : 1.8;
-    boundaryLabel.position.set(0, northCentreY, -hwZ);
-    scene.add(boundaryLabel);
+    function rebuildBoundary() {
+      const pts = [
+        ...terrainEdgePoints(-hwX, -hwZ,  hwX, -hwZ), // north
+        ...terrainEdgePoints( hwX, -hwZ,  hwX,  hwZ), // east
+        ...terrainEdgePoints( hwX,  hwZ, -hwX,  hwZ), // south
+        ...terrainEdgePoints(-hwX,  hwZ, -hwX, -hwZ), // west
+      ];
+      boundaryLine.geometry.dispose();
+      boundaryLine.geometry = new THREE.BufferGeometry().setFromPoints(pts);
+    }
+    rebuildBoundary();
 
     // ── Click-to-focus tween ──────────────────────────────────────────
     interface FocusTween {
@@ -1085,14 +1085,53 @@ export default function TerrainScene({
     }
 
     // ── Box-zoom (right-click drag, always active) ────────────────────
-    function startBoxZoomTween(hit: THREE.Vector3, ndcW: number, ndcH: number) {
-      const span = Math.max(ndcW, ndcH);
-      const ZOOM_DIST = THREE.MathUtils.clamp(3.0 / span, 2.5, 18);
+    // Raycast all 4 corners of the selection rect, compute world bounding box,
+    // then calculate exact camera height so the area fills the screen.
+    function startBoxZoomTween(
+      sx: number, sy: number, // screen start (mousedown)
+      ex: number, ey: number, // screen end   (mouseup)
+      rect: DOMRectReadOnly,
+    ) {
+      const toNDC = (px: number, py: number) => new THREE.Vector2(
+        ((px - rect.left) / rect.width) * 2 - 1,
+        -((py - rect.top) / rect.height) * 2 + 1,
+      );
+
+      // Raycast the 4 corners of the drawn box to the terrain
+      const corners = [
+        toNDC(sx, sy), toNDC(ex, sy),
+        toNDC(sx, ey), toNDC(ex, ey),
+      ];
+      const ray = new THREE.Raycaster();
+      const pts: THREE.Vector3[] = [];
+      for (const ndc of corners) {
+        ray.setFromCamera(ndc, camera);
+        const hits = ray.intersectObject(terrainMesh);
+        if (hits.length > 0) pts.push(hits[0].point);
+      }
+      if (pts.length < 2) return;
+
+      // World bounding box of the selected region
+      const bb = new THREE.Box3().setFromPoints(pts);
+      const center = new THREE.Vector3();
+      bb.getCenter(center);
+      const size = new THREE.Vector3();
+      bb.getSize(size);
+
+      // Perspective math: half-height visible at distance d = d * tan(fov/2)
+      // Solve for d so the region exactly fills the screen (with 10% padding)
+      const fovRad = (camera.fov * Math.PI) / 180;
+      const tanHalfFov = Math.tan(fovRad / 2);
+      const distForHeight = (size.z / 2 * 1.1) / tanHalfFov;
+      const distForWidth  = (size.x / 2 * 1.1) / (tanHalfFov * camera.aspect);
+      const ZOOM_DIST = Math.max(distForHeight, distForWidth, 1.5);
+
       focusTween = {
         fromPos: camera.position.clone(),
         fromTarget: controls.target.clone(),
-        toPos: new THREE.Vector3(hit.x, hit.y + ZOOM_DIST, hit.z + ZOOM_DIST * 0.15),
-        toTarget: hit.clone(),
+        // Nearly top-down: tiny z offset to avoid gimbal flip
+        toPos: new THREE.Vector3(center.x, center.y + ZOOM_DIST, center.z + ZOOM_DIST * 0.04),
+        toTarget: new THREE.Vector3(center.x, center.y, center.z),
         t: 0,
       };
     }
@@ -1101,18 +1140,15 @@ export default function TerrainScene({
     let boxOverlay: HTMLDivElement | null = null;
     let boxDragged = false;
 
-    // Prevent browser context menu on right-click
-    const onContextMenu = (e: MouseEvent) => e.preventDefault();
-
     let mouseDownXY = { x: 0, y: 0 };
     const onMouseDown = (e: MouseEvent) => {
       mouseDownXY = { x: e.clientX, y: e.clientY };
-      if (e.button !== 2) return; // only right-click triggers box zoom
+      if (e.button !== 0 || !boxZoomModeRef.current) return; // left-click + box mode only
 
-      e.stopPropagation(); // prevent OrbitControls from handling right-click
+      e.stopPropagation(); // prevent OrbitControls from starting an orbit
       boxStart = { x: e.clientX, y: e.clientY };
       boxDragged = false;
-      controls.enabled = false; // pause OrbitControls during box draw
+      controls.enabled = false;
 
       const parent = canvas!.parentElement;
       if (parent) {
@@ -1149,19 +1185,7 @@ export default function TerrainScene({
 
       if (boxDragged && Math.abs(e.clientX - boxStart.x) > 8 && Math.abs(e.clientY - boxStart.y) > 8) {
         const rect = canvas!.getBoundingClientRect();
-        const cx = (boxStart.x + e.clientX) / 2;
-        const cy = (boxStart.y + e.clientY) / 2;
-        const ndcCenter = new THREE.Vector2(
-          ((cx - rect.left) / rect.width) * 2 - 1,
-          -((cy - rect.top) / rect.height) * 2 + 1,
-        );
-        const ndcW = Math.abs(e.clientX - boxStart.x) / rect.width * 2;
-        const ndcH = Math.abs(e.clientY - boxStart.y) / rect.height * 2;
-
-        const ray = new THREE.Raycaster();
-        ray.setFromCamera(ndcCenter, camera);
-        const hits = ray.intersectObject(terrainMesh);
-        if (hits.length > 0) startBoxZoomTween(hits[0].point, ndcW, ndcH);
+        startBoxZoomTween(boxStart.x, boxStart.y, e.clientX, e.clientY, rect);
       }
 
       boxStart = null;
@@ -1169,6 +1193,7 @@ export default function TerrainScene({
     };
 
     const onClick = (e: MouseEvent) => {
+      if (boxDragged) return; // suppress click after a box draw
       if (!focusModeRef.current) return;
       const dx = e.clientX - mouseDownXY.x,
         dy = e.clientY - mouseDownXY.y;
@@ -1184,7 +1209,6 @@ export default function TerrainScene({
       const hits = ray.intersectObject(terrainMesh);
       if (hits.length > 0) startFocusTween(hits[0].point);
     };
-    canvas.addEventListener("contextmenu", onContextMenu);
     canvas.addEventListener("mousedown", onMouseDown, { capture: true });
     canvas.addEventListener("mousemove", onMouseMove);
     canvas.addEventListener("mouseup", onMouseUp);
@@ -1241,6 +1265,7 @@ export default function TerrainScene({
         heightsArray = buildHeights(elev);
         applyHeights(heightsArray);
         rebuildSkirt();
+        rebuildBoundary();
         repositionSurface();
         const badge = document.getElementById("source-badge");
         if (badge) {
@@ -1373,7 +1398,6 @@ export default function TerrainScene({
       renderer.dispose();
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
-      canvas.removeEventListener("contextmenu", onContextMenu);
       canvas.removeEventListener("mousedown", onMouseDown, { capture: true });
       canvas.removeEventListener("mousemove", onMouseMove);
       canvas.removeEventListener("mouseup", onMouseUp);
@@ -1382,5 +1406,11 @@ export default function TerrainScene({
     };
   }, []);
 
-  return <canvas ref={canvasRef} className="terrain-canvas" />;
+  return (
+    <canvas
+      ref={canvasRef}
+      className="terrain-canvas"
+      style={boxZoomMode ? { cursor: 'crosshair' } : undefined}
+    />
+  );
 }
