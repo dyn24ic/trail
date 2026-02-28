@@ -11,7 +11,7 @@ import logging
 from django.http import JsonResponse
 from django.views.decorators.http import require_GET
 
-from .services.hotspot_service import predict_hotspots
+from .services.hotspot_service import predict_hotspots as predict_hotspots_service
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +44,7 @@ def predict_hotspots_view(request):
         return JsonResponse({"error": "Invalid bbox: south must be < north, west must be < east."}, status=400)
 
     try:
-        result = predict_hotspots(bbox)
+        result = predict_hotspots_service(bbox)
         return JsonResponse(result, safe=False)
     except Exception as exc:
         logger.exception("Hotspot prediction failed: %s", exc)
