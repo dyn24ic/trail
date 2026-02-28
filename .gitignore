@@ -1,43 +1,32 @@
-# scala-cli
-.scala-build/
-.bsp/
+# ── Next.js (app/) ──────────────────────────────
+node_modules/
+.next/
+out/
+dist/
+.env.local
+.env*.local
 
-
-# SQLite databases
-*.db
-*.sqlite3
-*.db-shm
-*.db-wal
-
-# IDE
-.idea/
-.vscode/
-*.iml
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Logs
-*.log
-
-# Python
+# ── Python / Django (frontend/) ─────────────────
 __pycache__/
 *.py[cod]
-.venv/
-venv/
-env/
+*.pyo
+*.pyd
+*.so
+frontend/venv/
+frontend/.venv/
+frontend/*.sqlite3
+frontend/dem_cache/
+frontend/.env
+frontend/staticfiles/
+frontend/media/
 
-# Node / frontend
-node_modules/
-dist/
-.next/
-.nuxt/
+# ── macOS ────────────────────────────────────────
+.DS_Store
 
-.metals/
-.env
-**/.env
-.env.local
-.env.example
-**/.env.example
-**/.env.local
+# ── IDE ──────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+
+# ── Logs ─────────────────────────────────────────
+*.log
