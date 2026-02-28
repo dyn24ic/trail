@@ -7,12 +7,94 @@ import { YOSEMITE_BBOX } from '@/data/trailBbox';
 import type { DangerZone } from '@/types/backend';
 import type { CameraControls } from '@/components/three/TerrainScene';
 
+// ── Coordinate utilities ───────────────────────────────────────────────────
+
+function toDMS(dd: number, isLat: boolean): string {
+  const abs = Math.abs(dd);
+  const deg = Math.floor(abs);
+  const minF = (abs - deg) * 60;
+  const min  = Math.floor(minF);
+  const sec  = Math.round((minF - min) * 60);
+  const dir  = isLat ? (dd >= 0 ? 'N' : 'S') : (dd >= 0 ? 'E' : 'W');
+  return `${deg}°${String(min).padStart(2, '0')}'${String(sec).padStart(2, '0')}"${dir}`;
+}
+
+function latLonToMGRS(lat: number, lon: number): string {
+  // WGS84
+  const a  = 6378137.0;
+  const f  = 1 / 298.257223563;
+  const b  = a * (1 - f);
+  const e2 = 1 - (b * b) / (a * a);
+  const eP2 = e2 / (1 - e2);
+  const k0 = 0.9996;
+
+  const latR = (lat * Math.PI) / 180;
+  const lonR = (lon * Math.PI) / 180;
+  const zoneNum = Math.floor((lon + 180) / 6) + 1;
+  const lon0 = (((zoneNum - 1) * 6 - 180 + 3) * Math.PI) / 180;
+
+  const N  = a / Math.sqrt(1 - e2 * Math.sin(latR) ** 2);
+  const T  = Math.tan(latR) ** 2;
+  const C  = eP2 * Math.cos(latR) ** 2;
+  const A  = Math.cos(latR) * (lonR - lon0);
+  const e4 = e2 * e2, e6 = e4 * e2;
+
+  const M = a * (
+    (1 - e2/4 - 3*e4/64 - 5*e6/256)    * latR
+    - (3*e2/8 + 3*e4/32  + 45*e6/1024)  * Math.sin(2*latR)
+    + (15*e4/256 + 45*e6/1024)           * Math.sin(4*latR)
+    - (35*e6/3072)                        * Math.sin(6*latR)
+  );
+
+  const easting = k0 * N * (
+    A
+    + (1 - T + C)                                          * A**3 / 6
+    + (5 - 18*T + T**2 + 72*C - 58*eP2)                   * A**5 / 120
+  ) + 500000;
+
+  let northing = k0 * (
+    M + N * Math.tan(latR) * (
+      A**2 / 2
+      + (5 - T + 9*C + 4*C**2)                            * A**4 / 24
+      + (61 - 58*T + T**2 + 600*C - 330*eP2)              * A**6 / 720
+    )
+  );
+  if (lat < 0) northing += 10000000;
+
+  // Latitude band
+  const BANDS = 'CDEFGHJKLMNPQRSTUVWX';
+  const band  = BANDS[Math.max(0, Math.min(19, Math.floor((lat + 80) / 8)))];
+
+  // 100km column letter
+  const COL_SETS = ['ABCDEFGH', 'JKLMNPQR', 'STUVWXYZ'];
+  const colIdx   = Math.floor(easting / 100000) - 1;
+  const colLetter = COL_SETS[(zoneNum - 1) % 3][Math.max(0, Math.min(7, colIdx))];
+
+  // 100km row letter (20-letter cycle, I and O omitted)
+  const ROW_SETS = ['ABCDEFGHJKLMNPQRSTUV', 'FGHJKLMNPQRSTUVABCDE'];
+  const rowLetter = ROW_SETS[(zoneNum - 1) % 2][Math.floor(northing / 100000) % 20];
+
+  // 100 m precision (3-digit)
+  const eStr = String(Math.floor((easting  % 100000) / 100)).padStart(3, '0');
+  const nStr = String(Math.floor((northing % 100000) / 100)).padStart(3, '0');
+
+  return `${zoneNum}${band} ${colLetter}${rowLetter} ${eStr} ${nStr}`;
+}
+
 const TerrainScene = dynamic(() => import('@/components/three/TerrainScene'), {
   ssr: false,
   loading: () => <div className="terrain-canvas" style={{ background: '#040B0B' }} />,
 });
 
-export default function MapContainer() {
+interface MapContainerProps {
+  leftOpen?: boolean;
+  rightOpen?: boolean;
+}
+
+export default function MapContainer({ leftOpen = false, rightOpen = false }: MapContainerProps) {
+  const lp = leftOpen ? 320 : 0;
+  const rp = rightOpen ? 320 : 0;
+  const [center, setCenter] = useState<{ lat: number; lon: number; elevM: number } | null>(null);
   const [layers, setLayers] = useState({
     sensors: true,
     drones: true,
@@ -58,7 +140,7 @@ export default function MapContainer() {
   ];
 
   return (
-    <div className="map-container" style={{ position: 'absolute', inset: 0 }}>
+    <div className="map-container" style={{ position: 'absolute', inset: 0, '--lp': `${lp}px`, '--rp': `${rp}px` } as React.CSSProperties}>
       {/* Floating vertical toolbar */}
       <div className="map-toolbar">
         <span className="tb-section-lbl">LAYERS</span>
@@ -121,6 +203,7 @@ export default function MapContainer() {
         placementData={hotspots.placement}
         onControlsReady={(ctrl) => { cameraControlsRef.current = ctrl; }}
         onSatStatus={setSatStatus}
+        onCenterUpdate={(lat, lon, elevM) => setCenter({ lat, lon, elevM })}
       />
 
       {/* Box-zoom toggle — top-right corner of the map */}
@@ -130,7 +213,8 @@ export default function MapContainer() {
         style={{
           position: 'absolute',
           top: '12px',
-          right: '12px',
+          right: `${rp + 12}px`,
+          transition: 'right 0.3s cubic-bezier(0.4,0,0.2,1)',
           padding: '6px 12px',
           background: boxZoomMode ? 'rgba(0,255,200,0.18)' : 'rgba(4,11,11,0.75)',
           border: `1.5px solid ${boxZoomMode ? 'rgba(0,255,200,0.9)' : 'rgba(0,255,200,0.3)'}`,
@@ -191,9 +275,19 @@ export default function MapContainer() {
       </div>
 
       <div className="map-coords">
-        37°44&apos;45&quot;N&nbsp;&nbsp;119°31&apos;59&quot;W<br />
-        Elev: 2696m&nbsp;&nbsp;&nbsp;MSL<br />
-        Grid: 11S&nbsp;MT&nbsp;428&nbsp;863
+        {center ? (
+          <>
+            {toDMS(center.lat, true)}&nbsp;&nbsp;{toDMS(center.lon, false)}<br />
+            Elev: {center.elevM}m&nbsp;&nbsp;&nbsp;MSL<br />
+            Grid: {latLonToMGRS(center.lat, center.lon).replace(/ /g, '\u00a0')}
+          </>
+        ) : (
+          <>
+            37°44&apos;45&quot;N&nbsp;&nbsp;119°31&apos;59&quot;W<br />
+            Elev: —<br />
+            Grid: —
+          </>
+        )}
       </div>
 
       <div className="map-overlay">
