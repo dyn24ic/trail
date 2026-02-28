@@ -14,7 +14,6 @@ export async function GET(req: NextRequest) {
   try {
     const res = await fetch(`${BACKEND}/api/weather/?lat=${lat}&lon=${lon}`, {
       headers: { 'Accept': 'application/json' },
-      next: { revalidate: 300 }, // cache 5 min
     });
     const data = await res.json();
     return NextResponse.json(data, { status: res.status });

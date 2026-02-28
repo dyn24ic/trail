@@ -20,7 +20,6 @@ export async function GET(req: NextRequest) {
     const url = `${BACKEND}/api/terrain/?west=${west}&south=${south}&east=${east}&north=${north}`;
     const res = await fetch(url, {
       headers: { 'Accept': 'application/json' },
-      next: { revalidate: 3600 }, // terrain rarely changes — cache 1h
     });
     const data = await res.json();
     return NextResponse.json(data, { status: res.status });

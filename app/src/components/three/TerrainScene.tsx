@@ -31,6 +31,7 @@ export interface CameraControls {
   zoomIn: () => void;
   zoomOut: () => void;
   reset: () => void;
+  topView: () => void;
 }
 
 interface Props {
@@ -45,7 +46,6 @@ interface Props {
   };
   viewMode: "3d" | "wireframe";
   focusMode?: boolean;
-  boxZoomMode?: boolean;
   dangerZones?: DangerZone[];
   hotspotData?: HotspotPredictionResponse | null;
   placementData?: PlacementSuggestions | null;
@@ -228,7 +228,6 @@ export default function TerrainScene({
   layers,
   viewMode,
   focusMode,
-  boxZoomMode,
   dangerZones,
   hotspotData,
   placementData,
@@ -240,7 +239,6 @@ export default function TerrainScene({
   const layersRef = useRef(layers);
   const viewModeRef = useRef(viewMode);
   const focusModeRef = useRef(focusMode ?? false);
-  const boxZoomModeRef = useRef(boxZoomMode ?? false);
   const dangerZonesRef = useRef<DangerZone[]>([]);
   const hotspotRef = useRef<HotspotPredictionResponse | null>(null);
   const placementRef = useRef<PlacementSuggestions | null>(null);
@@ -249,7 +247,6 @@ export default function TerrainScene({
   useEffect(() => { layersRef.current = layers; }, [layers]);
   useEffect(() => { viewModeRef.current = viewMode; }, [viewMode]);
   useEffect(() => { focusModeRef.current = focusMode ?? false; }, [focusMode]);
-  useEffect(() => { boxZoomModeRef.current = boxZoomMode ?? false; }, [boxZoomMode]);
   useEffect(() => { dangerZonesRef.current = dangerZones ?? []; }, [dangerZones]);
   useEffect(() => { hotspotRef.current = hotspotData ?? null; }, [hotspotData]);
   useEffect(() => { placementRef.current = placementData ?? null; }, [placementData]);
@@ -280,6 +277,12 @@ export default function TerrainScene({
     controls.maxDistance = 80;
     controls.maxPolarAngle = Math.PI / 2 - 0.01;
     controls.zoomSpeed = 1.4;
+    // Disable right-click pan — right-click drag is used for box-zoom
+    controls.mouseButtons = {
+      LEFT: THREE.MOUSE.ROTATE,
+      MIDDLE: THREE.MOUSE.DOLLY,
+      RIGHT: THREE.MOUSE.ROTATE,
+    };
     controls.update();
 
     // Expose camera control functions to the parent
@@ -300,6 +303,15 @@ export default function TerrainScene({
         camera.position.set(0, 22, 28);
         controls.target.set(0, 1.5, 0);
         controls.update();
+      },
+      topView: () => {
+        focusTween = {
+          fromPos: camera.position.clone(),
+          fromTarget: controls.target.clone(),
+          toPos: new THREE.Vector3(0, 38, 0.001),
+          toTarget: new THREE.Vector3(0, 1.5, 0),
+          t: 0,
+        };
       },
     });
 
@@ -1072,7 +1084,7 @@ export default function TerrainScene({
       };
     }
 
-    // ── Box-zoom tool ─────────────────────────────────────────────────
+    // ── Box-zoom (right-click drag, always active) ────────────────────
     function startBoxZoomTween(hit: THREE.Vector3, ndcW: number, ndcH: number) {
       const span = Math.max(ndcW, ndcH);
       const ZOOM_DIST = THREE.MathUtils.clamp(3.0 / span, 2.5, 18);
@@ -1089,15 +1101,18 @@ export default function TerrainScene({
     let boxOverlay: HTMLDivElement | null = null;
     let boxDragged = false;
 
+    // Prevent browser context menu on right-click
+    const onContextMenu = (e: MouseEvent) => e.preventDefault();
+
     let mouseDownXY = { x: 0, y: 0 };
     const onMouseDown = (e: MouseEvent) => {
       mouseDownXY = { x: e.clientX, y: e.clientY };
-      if (!boxZoomModeRef.current) return;
+      if (e.button !== 2) return; // only right-click triggers box zoom
 
+      e.stopPropagation(); // prevent OrbitControls from handling right-click
       boxStart = { x: e.clientX, y: e.clientY };
       boxDragged = false;
-      controls.enableRotate = false;
-      controls.enablePan = false;
+      controls.enabled = false; // pause OrbitControls during box draw
 
       const parent = canvas!.parentElement;
       if (parent) {
@@ -1111,7 +1126,7 @@ export default function TerrainScene({
     };
 
     const onMouseMove = (e: MouseEvent) => {
-      if (!boxZoomModeRef.current || !boxStart || !boxOverlay) return;
+      if (!boxStart || !boxOverlay) return;
       boxDragged = true;
 
       const rect = canvas!.getBoundingClientRect();
@@ -1127,42 +1142,33 @@ export default function TerrainScene({
     };
 
     const onMouseUp = (e: MouseEvent) => {
-      if (!boxZoomModeRef.current || !boxStart) return;
+      if (!boxStart) return;
 
-      if (boxOverlay) {
-        boxOverlay.remove();
-        boxOverlay = null;
+      if (boxOverlay) { boxOverlay.remove(); boxOverlay = null; }
+      controls.enabled = true;
+
+      if (boxDragged && Math.abs(e.clientX - boxStart.x) > 8 && Math.abs(e.clientY - boxStart.y) > 8) {
+        const rect = canvas!.getBoundingClientRect();
+        const cx = (boxStart.x + e.clientX) / 2;
+        const cy = (boxStart.y + e.clientY) / 2;
+        const ndcCenter = new THREE.Vector2(
+          ((cx - rect.left) / rect.width) * 2 - 1,
+          -((cy - rect.top) / rect.height) * 2 + 1,
+        );
+        const ndcW = Math.abs(e.clientX - boxStart.x) / rect.width * 2;
+        const ndcH = Math.abs(e.clientY - boxStart.y) / rect.height * 2;
+
+        const ray = new THREE.Raycaster();
+        ray.setFromCamera(ndcCenter, camera);
+        const hits = ray.intersectObject(terrainMesh);
+        if (hits.length > 0) startBoxZoomTween(hits[0].point, ndcW, ndcH);
       }
-      controls.enableRotate = true;
-      controls.enablePan = true;
-
-      if (!boxDragged) {
-        boxStart = null;
-        return;
-      }
-
-      const rect = canvas!.getBoundingClientRect();
-      const cx = (boxStart.x + e.clientX) / 2;
-      const cy = (boxStart.y + e.clientY) / 2;
-      const ndcCenter = new THREE.Vector2(
-        ((cx - rect.left) / rect.width) * 2 - 1,
-        -((cy - rect.top) / rect.height) * 2 + 1,
-      );
-      const ndcW = Math.abs(e.clientX - boxStart.x) / rect.width * 2;
-      const ndcH = Math.abs(e.clientY - boxStart.y) / rect.height * 2;
-
-      const ray = new THREE.Raycaster();
-      ray.setFromCamera(ndcCenter, camera);
-      const hits = ray.intersectObject(terrainMesh);
-      if (hits.length > 0) startBoxZoomTween(hits[0].point, ndcW, ndcH);
 
       boxStart = null;
       boxDragged = false;
     };
 
     const onClick = (e: MouseEvent) => {
-      // Skip click-focus if box zoom just completed a drag
-      if (boxZoomModeRef.current && boxDragged) return;
       if (!focusModeRef.current) return;
       const dx = e.clientX - mouseDownXY.x,
         dy = e.clientY - mouseDownXY.y;
@@ -1178,7 +1184,8 @@ export default function TerrainScene({
       const hits = ray.intersectObject(terrainMesh);
       if (hits.length > 0) startFocusTween(hits[0].point);
     };
-    canvas.addEventListener("mousedown", onMouseDown);
+    canvas.addEventListener("contextmenu", onContextMenu);
+    canvas.addEventListener("mousedown", onMouseDown, { capture: true });
     canvas.addEventListener("mousemove", onMouseMove);
     canvas.addEventListener("mouseup", onMouseUp);
     canvas.addEventListener("click", onClick);
@@ -1271,6 +1278,12 @@ export default function TerrainScene({
       backendZoneGroups.forEach((g) => { g.visible = L.zones; });
       landmarkGroups.forEach((g) => { g.visible = L.landmarks; });
 
+      // Scale all surface markers proportionally to camera distance
+      // so labels & dots stay readable when zoomed out and uncluttered when zoomed in
+      const dist = camera.position.distanceTo(controls.target);
+      const markerScale = THREE.MathUtils.clamp(dist / 28, 0.12, 2.5);
+      surfGroups.forEach(({ group }) => { group.scale.setScalar(markerScale); });
+
       // Sensor pulse
       sensorAnims.forEach(({ ring, mat, phase, dot }) => {
         const grp = dot.parent!;
@@ -1360,7 +1373,8 @@ export default function TerrainScene({
       renderer.dispose();
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
-      canvas.removeEventListener("mousedown", onMouseDown);
+      canvas.removeEventListener("contextmenu", onContextMenu);
+      canvas.removeEventListener("mousedown", onMouseDown, { capture: true });
       canvas.removeEventListener("mousemove", onMouseMove);
       canvas.removeEventListener("mouseup", onMouseUp);
       canvas.removeEventListener("click", onClick);
@@ -1368,11 +1382,5 @@ export default function TerrainScene({
     };
   }, []);
 
-  return (
-    <canvas
-      ref={canvasRef}
-      className="terrain-canvas"
-      style={boxZoomMode ? { cursor: 'crosshair' } : undefined}
-    />
-  );
+  return <canvas ref={canvasRef} className="terrain-canvas" />;
 }
