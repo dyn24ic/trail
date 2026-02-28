@@ -36,3 +36,8 @@ dist/
 
 .metals/
 .env
+**/.env
+.env.local
+.env.example
+**/.env.example
+**/.env.local
