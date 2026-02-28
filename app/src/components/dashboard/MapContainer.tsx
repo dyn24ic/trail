@@ -101,7 +101,6 @@ function toIncidentMarker(inc: IncidentSummary): IncidentMarker | null {
   };
 }
 
-export default function MapContainer() {
 interface MapContainerProps {
   leftOpen?: boolean;
   rightOpen?: boolean;
