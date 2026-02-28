@@ -1,0 +1,13 @@
+//> using scala "3.8.2"
+
+//> using dep "org.http4s::http4s-ember-server:0.23.33"
+//> using dep "org.http4s::http4s-circe:0.23.33"
+//> using dep "org.http4s::http4s-dsl:0.23.33"
+//> using dep "org.tpolecat::doobie-core:1.0.0-RC5"
+//> using dep "org.tpolecat::doobie-hikari:1.0.0-RC5"
+//> using dep "io.circe::circe-generic:0.14.15"
+//> using dep "io.circe::circe-parser:0.14.15"
+//> using dep "io.circe::circe-literal:0.14.15"
+//> using dep "org.xerial:sqlite-jdbc:3.51.2.0"
+//> using dep "org.typelevel::cats-effect:3.6.3"
+//> using dep "ch.qos.logback:logback-classic:1.5.32"
