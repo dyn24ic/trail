@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import type { IncidentSummary, Incident } from '@/types/backend';
 
-export function useIncidents(pollMs = 15_000) {
+export function useIncidents(pollMs = 3_000) {
   const [incidents, setIncidents] = useState<IncidentSummary[]>([]);
   const [loading, setLoading] = useState(true);
 

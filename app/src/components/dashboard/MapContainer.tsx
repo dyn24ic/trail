@@ -51,8 +51,10 @@ export default function MapContainer() {
     .map(toIncidentMarker)
     .filter((m): m is IncidentMarker => m !== null);
 
-  // Remount TerrainScene exactly once when live data first arrives so markers update
-  const sceneKey = incLoading ? 'init' : 'live';
+  // Remount TerrainScene whenever the incident list changes (new incident or status update)
+  const sceneKey = incidents.length === 0 && incLoading
+    ? 'init'
+    : incidents.map((i: IncidentSummary) => `${i.id}:${i.status}`).join(',');
 
   const toggle = (name: keyof typeof layers) => {
     setLayers((prev) => ({ ...prev, [name]: !prev[name] }));
