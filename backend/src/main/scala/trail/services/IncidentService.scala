@@ -37,15 +37,12 @@ class IncidentService(
                     updatedAt      = now
                   )
       _        <- repo.create(incident)
-      _        <- runPipeline(incident).start
+      _        <- runPipeline(incident, event).start
     yield incident
 
-  private def runPipeline(incident: Incident): IO[Unit] =
+  private def runPipeline(incident: Incident, event: TriggerEvent): IO[Unit] =
     for
-      zones      <- zonePredictor.predict(
-                      incident.locationLat.getOrElse(0.0),
-                      incident.locationLng.getOrElse(0.0)
-                    )
+      zones      <- zonePredictor.predict(event)
       searching  =  incident.copy(
                       status      = IncidentStatus.Searching,
                       searchZones = Some(zones),
