@@ -1,0 +1,14 @@
+Django==5.2.11
+djangorestframework==3.16.1
+django-cors-headers==4.9.0
+python-dotenv==1.2.1
+requests==2.32.5
+# numpy<2.0 required: rasterio 1.5.0 was compiled against numpy 1.x headers;
+# numpy 2.x causes malloc: double free on macOS via GDAL memory management.
+numpy>=1.24,<2.0
+scipy==1.17.1
+rasterio==1.5.0
+pyproj==3.7.2
+seamless-3dep==0.3.1
+openai==2.24.0
+httpx==0.28.1

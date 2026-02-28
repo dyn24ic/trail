@@ -22,7 +22,7 @@ export default function MapContainer() {
     hotspots: true,
     osm: false,
   });
-  const [viewMode, setViewMode] = useState<'3d' | 'wireframe'>('3d');
+  const [viewMode, setViewMode] = useState<'3d' | '2d'>('3d');
   const [focusMode, setFocusMode] = useState(false);
   const [boxZoomMode, setBoxZoomMode] = useState(false);
   const [satStatus, setSatStatus] = useState<'idle' | 'loading' | 'loaded' | 'error'>('idle');
@@ -74,8 +74,14 @@ export default function MapContainer() {
         ))}
         <div className="tb-sep" />
         <span className="tb-section-lbl">VIEW</span>
-        <button className={`tb-view-btn${viewMode === '3d' ? ' on' : ''}`} onClick={() => setViewMode('3d')}>3D</button>
-        <button className={`tb-view-btn${viewMode === 'wireframe' ? ' on' : ''}`} onClick={() => setViewMode('wireframe')}>Wire</button>
+        <button className={`tb-view-btn${viewMode === '3d' ? ' on' : ''}`} onClick={() => {
+          setViewMode('3d');
+          setLayers(prev => ({ ...prev, osm: false }));
+        }}>3D</button>
+        <button className={`tb-view-btn${viewMode === '2d' ? ' on' : ''}`} onClick={() => {
+          setViewMode('2d');
+          setLayers(prev => ({ ...prev, osm: true }));
+        }}>2D</button>
         <div className="tb-sep" />
         <button
           className={`tb-focus-btn${focusMode ? ' on' : ''}`}
@@ -199,6 +205,9 @@ export default function MapContainer() {
         <div className="legend-item"><span className="legend-line" style={{ background: 'rgba(74,159,212,0.6)' }}></span>Search Zone</div>
         <div className="legend-item"><span className="legend-dot" style={{ background: '#FFD700' }}></span>Landmark</div>
         <div className="legend-item"><span className="legend-line" style={{ background: '#88BBFF' }}></span>OSM Overlay</div>
+        <div className="legend-item"><span className="legend-line" style={{ background: '#00E87A' }}></span>SAR Alpha Route</div>
+        <div className="legend-item"><span className="legend-line" style={{ background: '#FF9500' }}></span>Ranger 7 Route</div>
+        <div className="legend-item"><span className="legend-line" style={{ background: '#00CFFF' }}></span>Helicopter Arc</div>
       </div>
 
       <div id="source-badge" className="source-badge procedural">Procedural</div>

@@ -27,15 +27,8 @@ export default function TopBar() {
       </div>
       <div className="tb-spacer" />
       <div className="tb-alerts">
-        <div className="alert-chip critical">
-          <span className="status-dot alert"></span>
-          1 Critical
-        </div>
-        <div className="alert-chip warning">
-          <span className="status-dot warn"></span>
-          2 Warnings
-        </div>
-        <div className="alert-chip">12 Sensors OK</div>
+        <div className="alert-chip">0 Incidents</div>
+        <div className="alert-chip">0 Sensors</div>
       </div>
       <div className="tb-time" ref={clockRef}>14:38:22</div>
       <Link href="/" className="tb-nav-link">← Landing</Link>
