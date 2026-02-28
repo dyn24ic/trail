@@ -169,3 +169,18 @@ export interface BackendHealthResponse {
   openai_configured: boolean;
   openweather_configured: boolean;
 }
+
+export interface LatLon {
+  lat: number;
+  lon: number;
+}
+
+export interface HybridRoute {
+  roadPath: LatLon[];
+  stopPoint: LatLon;
+  mountainRoute: RouteCalculateResponse;
+  roadEtaMinutes: number;
+  totalEtaMinutes: number;
+  weatherPenaltyApplied: boolean;
+  penaltyReason: string;
+}
