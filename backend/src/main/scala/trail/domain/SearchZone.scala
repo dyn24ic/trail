@@ -4,10 +4,10 @@ import io.circe.{Decoder, Encoder}
 import io.circe.generic.semiauto.*
 
 final case class SearchZone(
-  lat: Double,
-  lng: Double,
-  radiusMeters: Double,
-  confidence: Double
+    lat: Double,
+    lng: Double,
+    radiusMeters: Double,
+    confidence: Double
 )
 
 object SearchZone:

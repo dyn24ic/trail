@@ -16,34 +16,36 @@ class IncidentRepository(xa: Transactor[IO]):
     s.flatMap(str => decode[A](str).toOption)
 
   private def rowToIncident(
-    id: String,
-    triggerType: String,
-    triggerPayload: String,
-    status: String,
-    locationLat: Option[Double],
-    locationLng: Option[Double],
-    searchZones: Option[String],
-    droneResult: Option[String],
-    triage: Option[String],
-    route: Option[String],
-    createdAt: String,
-    updatedAt: String
+      id: String,
+      triggerType: String,
+      triggerPayload: String,
+      status: String,
+      locationLat: Option[Double],
+      locationLng: Option[Double],
+      searchZones: Option[String],
+      droneResult: Option[String],
+      triage: Option[String],
+      route: Option[String],
+      createdAt: String,
+      updatedAt: String
   ): Incident =
     val parsedStatus =
-      decode[IncidentStatus](s""""$status"""").getOrElse(IncidentStatus.Triggered)
+      decode[IncidentStatus](s""""$status"""").getOrElse(
+        IncidentStatus.Triggered
+      )
     Incident(
-      id             = id,
-      triggerType    = triggerType,
+      id = id,
+      triggerType = triggerType,
       triggerPayload = triggerPayload,
-      status         = parsedStatus,
-      locationLat    = locationLat,
-      locationLng    = locationLng,
-      searchZones    = decodeOpt[List[SearchZone]](searchZones),
-      droneResult    = decodeOpt[DroneResult](droneResult),
-      triage         = decodeOpt[InjuryTriage](triage),
-      route          = decodeOpt[ResponderRoute](route),
-      createdAt      = createdAt,
-      updatedAt      = updatedAt
+      status = parsedStatus,
+      locationLat = locationLat,
+      locationLng = locationLng,
+      searchZones = decodeOpt[List[SearchZone]](searchZones),
+      droneResult = decodeOpt[DroneResult](droneResult),
+      triage = decodeOpt[InjuryTriage](triage),
+      route = decodeOpt[ResponderRoute](route),
+      createdAt = createdAt,
+      updatedAt = updatedAt
     )
 
   def create(incident: Incident): IO[Unit] =
@@ -72,9 +74,23 @@ class IncidentRepository(xa: Transactor[IO]):
              search_zones, drone_result, triage, route,
              created_at, updated_at
       FROM incidents WHERE id = $id
-    """.query[(String, String, String, String, Option[Double], Option[Double],
-               Option[String], Option[String], Option[String], Option[String],
-               String, String)]
+    """
+      .query[
+        (
+            String,
+            String,
+            String,
+            String,
+            Option[Double],
+            Option[Double],
+            Option[String],
+            Option[String],
+            Option[String],
+            Option[String],
+            String,
+            String
+        )
+      ]
       .option
       .transact(xa)
       .map(_.map(rowToIncident.tupled))
@@ -86,9 +102,23 @@ class IncidentRepository(xa: Transactor[IO]):
              search_zones, drone_result, triage, route,
              created_at, updated_at
       FROM incidents ORDER BY created_at DESC
-    """.query[(String, String, String, String, Option[Double], Option[Double],
-               Option[String], Option[String], Option[String], Option[String],
-               String, String)]
+    """
+      .query[
+        (
+            String,
+            String,
+            String,
+            String,
+            Option[Double],
+            Option[Double],
+            Option[String],
+            Option[String],
+            Option[String],
+            Option[String],
+            String,
+            String
+        )
+      ]
       .to[List]
       .transact(xa)
       .map(_.map(rowToIncident.tupled))

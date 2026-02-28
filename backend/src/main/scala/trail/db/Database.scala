@@ -11,12 +11,12 @@ object Database:
     for
       ce <- ExecutionContexts.fixedThreadPool[IO](4)
       xa <- HikariTransactor.newHikariTransactor[IO](
-              driverClassName = "org.sqlite.JDBC",
-              url             = s"jdbc:sqlite:$dbPath",
-              user            = "",
-              pass            = "",
-              connectEC       = ce
-            )
+        driverClassName = "org.sqlite.JDBC",
+        url = s"jdbc:sqlite:$dbPath",
+        user = "",
+        pass = "",
+        connectEC = ce
+      )
     yield xa
 
   def initSchema(xa: HikariTransactor[IO]): IO[Unit] =

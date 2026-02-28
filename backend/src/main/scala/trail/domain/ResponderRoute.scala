@@ -4,19 +4,19 @@ import io.circe.{Decoder, Encoder}
 import io.circe.generic.semiauto.*
 
 final case class RouteStep(
-  stepNumber: Int,
-  description: String,
-  distanceMeters: Double,
-  estimatedMinutes: Int,
-  hazards: List[String]
+    stepNumber: Int,
+    description: String,
+    distanceMeters: Double,
+    estimatedMinutes: Int,
+    hazards: List[String]
 )
 
 final case class ResponderRoute(
-  steps: List[RouteStep],
-  totalDistanceMeters: Double,
-  totalEtaMinutes: Int,
-  accessType: String,
-  notes: String
+    steps: List[RouteStep],
+    totalDistanceMeters: Double,
+    totalEtaMinutes: Int,
+    accessType: String,
+    notes: String
 )
 
 object RouteStep:

@@ -18,18 +18,18 @@ object IncidentStatus:
     case other         => Left(s"Unknown status: $other")
 
 final case class Incident(
-  id: String,
-  triggerType: String,
-  triggerPayload: String,
-  status: IncidentStatus,
-  locationLat: Option[Double],
-  locationLng: Option[Double],
-  searchZones: Option[List[SearchZone]],
-  droneResult: Option[DroneResult],
-  triage: Option[InjuryTriage],
-  route: Option[ResponderRoute],
-  createdAt: String,
-  updatedAt: String
+    id: String,
+    triggerType: String,
+    triggerPayload: String,
+    status: IncidentStatus,
+    locationLat: Option[Double],
+    locationLng: Option[Double],
+    searchZones: Option[List[SearchZone]],
+    droneResult: Option[DroneResult],
+    triage: Option[InjuryTriage],
+    route: Option[ResponderRoute],
+    createdAt: String,
+    updatedAt: String
 )
 
 object Incident:
@@ -37,13 +37,13 @@ object Incident:
   given Decoder[Incident] = deriveDecoder
 
 final case class IncidentSummary(
-  id: String,
-  triggerType: String,
-  status: IncidentStatus,
-  locationLat: Option[Double],
-  locationLng: Option[Double],
-  createdAt: String,
-  updatedAt: String
+    id: String,
+    triggerType: String,
+    status: IncidentStatus,
+    locationLat: Option[Double],
+    locationLng: Option[Double],
+    createdAt: String,
+    updatedAt: String
 )
 
 object IncidentSummary:

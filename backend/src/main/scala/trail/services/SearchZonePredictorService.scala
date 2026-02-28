@@ -18,7 +18,22 @@ class SearchZonePredictorService:
         .toDouble
 
     List(
-      SearchZone(offsetDeg(lat), offsetDeg(lng), radiusMeters = 200.0, confidence = confidence),
-      SearchZone(offsetDeg(lat), offsetDeg(lng), radiusMeters = 350.0, confidence = confidence),
-      SearchZone(offsetDeg(lat), offsetDeg(lng), radiusMeters = 500.0, confidence = confidence)
+      SearchZone(
+        offsetDeg(lat),
+        offsetDeg(lng),
+        radiusMeters = 200.0,
+        confidence = confidence
+      ),
+      SearchZone(
+        offsetDeg(lat),
+        offsetDeg(lng),
+        radiusMeters = 350.0,
+        confidence = confidence
+      ),
+      SearchZone(
+        offsetDeg(lat),
+        offsetDeg(lng),
+        radiusMeters = 500.0,
+        confidence = confidence
+      )
     ).sortBy(-_.confidence)

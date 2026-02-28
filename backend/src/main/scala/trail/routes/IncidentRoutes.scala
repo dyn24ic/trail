@@ -18,28 +18,39 @@ object IncidentRoutes:
       }
 
     case GET -> Root / "api" / "v1" / "incidents" / id =>
-      service.getIncident(id).flatMap:
-        case Some(incident) => Ok(incident.asJson)
-        case None           => NotFound(io.circe.Json.obj("error" -> s"Incident $id not found".asJson))
+      service
+        .getIncident(id)
+        .flatMap:
+          case Some(incident) => Ok(incident.asJson)
+          case None           =>
+            NotFound(
+              io.circe.Json.obj("error" -> s"Incident $id not found".asJson)
+            )
 
     case GET -> Root / "api" / "v1" / "incidents" / id / "status" =>
-      service.getIncident(id).flatMap:
-        case Some(i) =>
-          Ok(io.circe.Json.obj(
-            "id"        -> i.id.asJson,
-            "status"    -> i.status.asJson,
-            "updatedAt" -> i.updatedAt.asJson
-          ))
-        case None =>
-          NotFound(io.circe.Json.obj("error" -> s"Incident $id not found".asJson))
+      service
+        .getIncident(id)
+        .flatMap:
+          case Some(i) =>
+            Ok(
+              io.circe.Json.obj(
+                "id" -> i.id.asJson,
+                "status" -> i.status.asJson,
+                "updatedAt" -> i.updatedAt.asJson
+              )
+            )
+          case None =>
+            NotFound(
+              io.circe.Json.obj("error" -> s"Incident $id not found".asJson)
+            )
 
   private def toSummary(i: Incident): IncidentSummary =
     IncidentSummary(
-      id          = i.id,
+      id = i.id,
       triggerType = i.triggerType,
-      status      = i.status,
+      status = i.status,
       locationLat = i.locationLat,
       locationLng = i.locationLng,
-      createdAt   = i.createdAt,
-      updatedAt   = i.updatedAt
+      createdAt = i.createdAt,
+      updatedAt = i.updatedAt
     )

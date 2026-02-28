@@ -15,11 +15,11 @@ object Severity:
     case other      => Left(s"Unknown severity: $other")
 
 final case class InjuryTriage(
-  severity: Severity,
-  injuryType: String,
-  consciousAndResponsive: Boolean,
-  recommendedResponse: String,
-  estimatedMedicalUrgencyMinutes: Int
+    severity: Severity,
+    injuryType: String,
+    consciousAndResponsive: Boolean,
+    recommendedResponse: String,
+    estimatedMedicalUrgencyMinutes: Int
 )
 
 object InjuryTriage:
