@@ -170,6 +170,21 @@ export interface BackendHealthResponse {
   openweather_configured: boolean;
 }
 
+export interface LatLon {
+  lat: number;
+  lon: number;
+}
+
+export interface HybridRoute {
+  roadPath: LatLon[];
+  stopPoint: LatLon;
+  mountainRoute: RouteCalculateResponse;
+  roadEtaMinutes: number;
+  totalEtaMinutes: number;
+  weatherPenaltyApplied: boolean;
+  penaltyReason: string;
+}
+
 // ── Scala incident types ──────────────────────────────────────────────────────
 
 export type IncidentStatus =
@@ -230,10 +245,46 @@ export interface IncidentSummary {
   updatedAt: string;
 }
 
+export interface ReportTimeline {
+  triggeredAt:          string;
+  totalResponseMinutes: number;
+  droneSearchSeconds:   number;
+  victimFound:          boolean;
+  triageSeverity:       string | null;
+}
+
+export interface ResponseMetrics {
+  searchZoneCount:    number;
+  bestZoneConfidence: number;
+  droneConfidence:    number;
+  etaMinutes:         number;
+  accessType:         string;
+  medicalUrgencyMin:  number | null;
+}
+
+export interface TrailRecommendation {
+  category:    string;
+  priority:    string;
+  lat:         number | null;
+  lng:         number | null;
+  description: string;
+  rationale:   string;
+}
+
+export interface IncidentReport {
+  incidentId:        string;
+  generatedAt:       string;
+  timeline:          ReportTimeline;
+  rootCauseAnalysis: string;
+  responseMetrics:   ResponseMetrics;
+  recommendations:   TrailRecommendation[];
+}
+
 export interface Incident extends IncidentSummary {
   triggerPayload: string;
   searchZones: ScalaSearchZone[] | null;
   droneResult: ScalaDroneResult | null;
   triage: ScalaInjuryTriage | null;
   route: ScalaResponderRoute | null;
+  report: IncidentReport | null;
 }

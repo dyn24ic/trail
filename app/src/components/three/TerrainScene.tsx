@@ -21,7 +21,7 @@ import {
   heightAtMeshPos,
 } from "@/lib/coordMapping";
 import type { ElevationResponse, BBox } from "@/types/elevation";
-import type { DangerZone, RouteCompareResponse } from "@/types/backend";
+import type { DangerZone, RouteCompareResponse, RouteCalculateResponse } from "@/types/backend";
 import type {
   HotspotPredictionResponse,
   PlacementSuggestions,
@@ -54,9 +54,11 @@ interface Props {
   incidentMarkers?: IncidentMarker[];
   routeAlpha?: RouteCompareResponse | null;
   routeRanger?: RouteCompareResponse | null;
+  activeRoute?: RouteCalculateResponse | null;
   onControlsReady?: (ctrl: CameraControls) => void;
   onSatStatus?: (status: "loading" | "loaded" | "error") => void;
   onCenterUpdate?: (lat: number, lon: number, elevM: number) => void;
+  onElevSource?: (source: string) => void;
 }
 
 // ── Satellite image loading ───────────────────────────────────────────────────
@@ -201,9 +203,11 @@ export default function TerrainScene({
   incidentMarkers,
   routeAlpha,
   routeRanger,
+  activeRoute,
   onControlsReady,
   onSatStatus,
   onCenterUpdate,
+  onElevSource,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const elevData = useTerrainGrid(YOSEMITE_BBOX, MESH_RES);
@@ -218,6 +222,7 @@ export default function TerrainScene({
   const incidentMarkersRef = useRef<IncidentMarker[]>(incidentMarkers ?? incidentData);
   const routeAlphaRef = useRef<RouteCompareResponse | null>(null);
   const routeRangerRef = useRef<RouteCompareResponse | null>(null);
+  const activeRouteRef = useRef<RouteCalculateResponse | null>(null);
   const viewModeChangedRef = useRef(false);
   const onCenterUpdateRef = useRef(onCenterUpdate);
 
@@ -227,7 +232,8 @@ export default function TerrainScene({
 
   useEffect(() => {
     elevRef.current = elevData;
-  }, [elevData]);
+    if (elevData?.source) onElevSource?.(elevData.source);
+  }, [elevData, onElevSource]);
   useEffect(() => {
     layersRef.current = layers;
   }, [layers]);
@@ -259,6 +265,9 @@ export default function TerrainScene({
   useEffect(() => {
     routeRangerRef.current = routeRanger ?? null;
   }, [routeRanger]);
+  useEffect(() => {
+    activeRouteRef.current = activeRoute ?? null;
+  }, [activeRoute]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -288,7 +297,7 @@ export default function TerrainScene({
     controls.autoRotate = false;
     controls.enableDamping = true;
     controls.dampingFactor = 0.07;
-    controls.minDistance = 4.0;
+    controls.minDistance = 0.8;
     controls.maxDistance = 80;
     controls.maxPolarAngle = Math.PI / 2 - 0.01;
     controls.zoomSpeed = 1.4;
@@ -1099,9 +1108,119 @@ export default function TerrainScene({
     const routeGroup = new THREE.Group();
     scene.add(routeGroup);
 
+    // Active route group — elevation-coloured mountain route from planner
+    const activeRouteGroup = new THREE.Group();
+    scene.add(activeRouteGroup);
+
     // Track last-rendered waypoint count to detect changes
     let prevAlphaWpCount = -1;
     let prevRangerWpCount = -1;
+    let prevActiveRouteWpCount = -1;
+
+    // ── Elevation-to-colour mapping (green→yellow→orange→red) ────────
+    function elevColour(t: number): [number, number, number] {
+      const anchors: [number, [number, number, number]][] = [
+        [0.00, [34,  197, 94]],
+        [0.33, [234, 179, 8]],
+        [0.66, [249, 115, 22]],
+        [1.00, [239, 68,  68]],
+      ];
+      let lo = anchors[0], hi = anchors[anchors.length - 1];
+      for (let i = 0; i < anchors.length - 1; i++) {
+        if (t >= anchors[i][0] && t <= anchors[i + 1][0]) {
+          lo = anchors[i]; hi = anchors[i + 1]; break;
+        }
+      }
+      const span = hi[0] - lo[0] || 1;
+      const u = (t - lo[0]) / span;
+      return [
+        lo[1][0] + u * (hi[1][0] - lo[1][0]),
+        lo[1][1] + u * (hi[1][1] - lo[1][1]),
+        lo[1][2] + u * (hi[1][2] - lo[1][2]),
+      ];
+    }
+
+    function buildActiveRouteMesh(route: RouteCalculateResponse | null) {
+      // Dispose old geometry
+      activeRouteGroup.children.forEach((c) => {
+        if ((c as THREE.Mesh).isMesh || (c as THREE.Line).isLine) {
+          ((c as THREE.Mesh).geometry as THREE.BufferGeometry).dispose();
+          ((c as THREE.Mesh).material as THREE.Material).dispose();
+        }
+      });
+      activeRouteGroup.clear();
+
+      if (!route || route.route.waypoints.length < 2) return;
+
+      const wps = route.route.waypoints;
+      const elevs = wps.map((w) => w.elevation_m);
+      const minElev = Math.min(...elevs);
+      const maxElev = Math.max(...elevs);
+      const elevRange = maxElev - minElev || 1;
+
+      // Map waypoints to 3D positions; clamp to bbox so off-Yosemite routes still render on terrain edge
+      const points3D = wps.map((wp) => {
+        const clampedLat = Math.max(YOSEMITE_BBOX.south, Math.min(YOSEMITE_BBOX.north, wp.lat));
+        const clampedLon = Math.max(YOSEMITE_BBOX.west,  Math.min(YOSEMITE_BBOX.east,  wp.lon));
+        const { x, z } = latLonToMesh(clampedLat, clampedLon, YOSEMITE_BBOX, SZ_W, SZ_H);
+        const y = surf(x, z) + 0.3;
+        return new THREE.Vector3(x, y, z);
+      });
+
+      // Draw per-segment coloured tubes — thicker (0.09) so they're clearly visible
+      for (let i = 0; i < points3D.length - 1; i++) {
+        const t = (elevs[i] - minElev) / elevRange;
+        const [r, g, b] = elevColour(t);
+        const color = new THREE.Color(r / 255, g / 255, b / 255);
+        const segCurve = new THREE.LineCurve3(points3D[i], points3D[i + 1]);
+        const tube = new THREE.TubeGeometry(segCurve, 2, 0.09, 6, false);
+        const mat = new THREE.MeshBasicMaterial({ color, transparent: false });
+        activeRouteGroup.add(new THREE.Mesh(tube, mat));
+      }
+
+      // Victim marker (red sphere) at route end
+      const last = wps[wps.length - 1];
+      const lastClamped = {
+        lat: Math.max(YOSEMITE_BBOX.south, Math.min(YOSEMITE_BBOX.north, last.lat)),
+        lon: Math.max(YOSEMITE_BBOX.west,  Math.min(YOSEMITE_BBOX.east,  last.lon)),
+      };
+      const { x: vx, z: vz } = latLonToMesh(lastClamped.lat, lastClamped.lon, YOSEMITE_BBOX, SZ_W, SZ_H);
+      const vy = surf(vx, vz) + 0.35;
+      const victimSphere = new THREE.Mesh(
+        new THREE.SphereGeometry(0.28, 12, 12),
+        new THREE.MeshBasicMaterial({ color: 0xff2222 }),
+      );
+      victimSphere.position.set(vx, vy, vz);
+      activeRouteGroup.add(victimSphere);
+
+      // Stop point marker (orange sphere) at route start
+      const first = wps[0];
+      const firstClamped = {
+        lat: Math.max(YOSEMITE_BBOX.south, Math.min(YOSEMITE_BBOX.north, first.lat)),
+        lon: Math.max(YOSEMITE_BBOX.west,  Math.min(YOSEMITE_BBOX.east,  first.lon)),
+      };
+      const { x: sx, z: sz } = latLonToMesh(firstClamped.lat, firstClamped.lon, YOSEMITE_BBOX, SZ_W, SZ_H);
+      const sy = surf(sx, sz) + 0.35;
+      const stopSphere = new THREE.Mesh(
+        new THREE.SphereGeometry(0.22, 12, 12),
+        new THREE.MeshBasicMaterial({ color: 0xf97316 }),
+      );
+      stopSphere.position.set(sx, sy, sz);
+      activeRouteGroup.add(stopSphere);
+
+      // Auto-focus camera on the midpoint of the route at a good viewing angle
+      const mid = points3D[Math.floor(points3D.length / 2)];
+      // Estimate a view distance proportional to route length
+      const routeSpan = points3D[0].distanceTo(points3D[points3D.length - 1]);
+      const viewDist = Math.max(3, Math.min(12, routeSpan * 0.8));
+      focusTween = {
+        fromPos: camera.position.clone(),
+        fromTarget: controls.target.clone(),
+        toPos: new THREE.Vector3(mid.x + viewDist * 0.4, mid.y + viewDist, mid.z + viewDist * 0.7),
+        toTarget: new THREE.Vector3(mid.x, mid.y, mid.z),
+        t: 0,
+      };
+    }
 
     function buildRouteMeshes(
       alpha: RouteCompareResponse | null,
@@ -1650,6 +1769,13 @@ export default function TerrainScene({
         prevAlphaWpCount = alphaWpCount;
         prevRangerWpCount = rangerWpCount;
         buildRouteMeshes(routeAlphaRef.current, routeRangerRef.current);
+      }
+
+      // Active route (hybrid planner) — rebuild when waypoints change
+      const activeWpCount = activeRouteRef.current?.route.waypoints.length ?? 0;
+      if (activeWpCount !== prevActiveRouteWpCount) {
+        prevActiveRouteWpCount = activeWpCount;
+        buildActiveRouteMesh(activeRouteRef.current);
       }
 
       // Pulse hotspot fill discs

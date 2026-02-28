@@ -5,7 +5,7 @@ import io.circe.syntax.*
 import org.http4s.*
 import org.http4s.circe.*
 import org.http4s.dsl.io.*
-import trail.domain.{Incident, IncidentSummary}
+import trail.domain.{Incident, IncidentReport, IncidentSummary}
 import trail.services.IncidentService
 
 object IncidentRoutes:
@@ -21,6 +21,11 @@ object IncidentRoutes:
       service.getIncident(id).flatMap:
         case Some(incident) => Ok(incident.asJson)
         case None           => NotFound(io.circe.Json.obj("error" -> s"Incident $id not found".asJson))
+
+    case GET -> Root / "api" / "v1" / "incidents" / id / "report" =>
+      service.getReport(id).flatMap:
+        case Some(r) => Ok(r.asJson)
+        case None    => NotFound(io.circe.Json.obj("error" -> "Report not yet available".asJson))
 
     case GET -> Root / "api" / "v1" / "incidents" / id / "status" =>
       service.getIncident(id).flatMap:

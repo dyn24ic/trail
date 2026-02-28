@@ -34,5 +34,9 @@ object Database:
       triage           TEXT,
       route            TEXT,
       created_at       TEXT NOT NULL,
-      updated_at       TEXT NOT NULL
-    )""".update.run).transact(xa).void
+      updated_at       TEXT NOT NULL,
+      report           TEXT
+    )""".update.run).transact(xa).void >>
+    // Idempotent migration for existing databases that predate the report column
+    sql"ALTER TABLE incidents ADD COLUMN report TEXT"
+      .update.run.transact(xa).attempt.void
