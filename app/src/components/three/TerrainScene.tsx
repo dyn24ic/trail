@@ -11,14 +11,17 @@ import { incidentData } from '@/data/incidents';
 import { landmarkData } from '@/data/landmarks';
 import { yosemiteH } from '@/lib/elevation/fallbackTerrain';
 import { demGridToVertexHeights, latLonToMesh, heightAtMeshPos } from '@/lib/coordMapping';
-import type { ElevationResponse, BBox } from '@/types/elevation';
 
+import type { ElevationResponse, BBox } from '@/types/elevation';
+import type { HotspotPredictionResponse, PlacementSuggestions } from '@/types/hotspots';
 interface Props {
   layers: {
     sensors: boolean; drones: boolean; incidents: boolean;
-    zones: boolean; landmarks: boolean; osm: boolean;
+    zones: boolean; landmarks: boolean; osm: boolean; hotspots: boolean;
   };
   viewMode: '3d' | 'wireframe';
+  hotspotData?: HotspotPredictionResponse | null;
+  placementData?: PlacementSuggestions | null;
 }
 
 // ── OSM tile loading ──────────────────────────────────────────────────────────
@@ -99,18 +102,22 @@ function makeTextSprite(text: string, hexColor: string): THREE.Sprite {
   return sprite;
 }
 
-// ── Component ─────────────────────────────────────────────────────────────────
 
-export default function TerrainScene({ layers, viewMode }: Props) {
+export default function TerrainScene({ layers, viewMode, hotspotData, placementData }: Props) {
+
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const elevData = useTerrainGrid(YOSEMITE_BBOX, MESH_RES);
   const elevRef = useRef<ElevationResponse | null>(null);
   const layersRef = useRef(layers);
   const viewModeRef = useRef(viewMode);
+  const hotspotRef = useRef<HotspotPredictionResponse | null>(hotspotData ?? null);
+  const placementRef = useRef<PlacementSuggestions | null>(placementData ?? null);
 
   useEffect(() => { elevRef.current = elevData; }, [elevData]);
   useEffect(() => { layersRef.current = layers; }, [layers]);
   useEffect(() => { viewModeRef.current = viewMode; }, [viewMode]);
+  useEffect(() => { hotspotRef.current = hotspotData ?? null; }, [hotspotData]);
+  useEffect(() => { placementRef.current = placementData ?? null; }, [placementData]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -384,6 +391,127 @@ export default function TerrainScene({ layers, viewMode }: Props) {
       osmLoaded = true;
     });
 
+    // ── Hotspot + placement groups ────────────────────────────────────
+    // Meters per Three.js unit (Yosemite bbox over MESH_SIZE world units)
+    const LAT_M_PER_UNIT = (YOSEMITE_BBOX.north - YOSEMITE_BBOX.south) * 111120 / SZ;
+    const LON_M_PER_UNIT = (YOSEMITE_BBOX.east - YOSEMITE_BBOX.west) * 111120 * Math.cos(37.76 * Math.PI / 180) / SZ;
+    const M_PER_UNIT = (LAT_M_PER_UNIT + LON_M_PER_UNIT) / 2;
+
+    const hotspotGroup = new THREE.Group();
+    const placementGroup = new THREE.Group();
+    scene.add(hotspotGroup);
+    scene.add(placementGroup);
+
+    // Per-frame animation entries for pulsing hotspot fill discs
+    const hotspotAnims: { mat: THREE.MeshBasicMaterial; phase: number; base: number }[] = [];
+
+    let prevHotspotKey = '';
+
+    function clearGroup(g: THREE.Group) {
+      while (g.children.length) {
+        const c = g.children[0];
+        g.remove(c);
+        if ((c as THREE.Mesh).isMesh) {
+          (c as THREE.Mesh).geometry.dispose();
+          const m = (c as THREE.Mesh).material;
+          if (Array.isArray(m)) m.forEach(x => x.dispose()); else m.dispose();
+        } else if ((c as THREE.Line).isLine) {
+          (c as THREE.Line).geometry.dispose();
+          ((c as THREE.Line).material as THREE.Material).dispose();
+        } else if ((c as THREE.Sprite).isSprite) {
+          const sm = (c as THREE.Sprite).material as THREE.SpriteMaterial;
+          sm.map?.dispose(); sm.dispose();
+        }
+      }
+    }
+
+    const RISK_COLORS: Record<string, number> = {
+      low: 0x4A9FD4, moderate: 0xFFD84A, high: 0xFF8C42, extreme: 0xFF3B3B,
+    };
+
+    function buildHotspotMeshes(zones: HotspotPredictionResponse['hotspots']) {
+      hotspotAnims.length = 0;
+      zones.forEach((zone) => {
+        const { x, z } = latLonToMesh(zone.lat, zone.lon, YOSEMITE_BBOX, SZ);
+        const y = surf(x, z);
+        const meshRadius = zone.radiusMeters / M_PER_UNIT;
+        const color = RISK_COLORS[zone.riskLevel] ?? 0xFF8C42;
+
+        // Filled disc (low opacity, pulsing)
+        const fillMat = new THREE.MeshBasicMaterial({
+          color, transparent: true, opacity: 0.10, side: THREE.DoubleSide, depthWrite: false,
+        });
+        const fill = new THREE.Mesh(new THREE.CircleGeometry(meshRadius, 32), fillMat);
+        fill.rotation.x = -Math.PI / 2;
+        fill.position.set(x, y + 0.08, z);
+        hotspotGroup.add(fill);
+        hotspotAnims.push({ mat: fillMat, phase: Math.random() * Math.PI * 2, base: 0.10 });
+
+        // Outer ring
+        const ringMat = new THREE.MeshBasicMaterial({
+          color, transparent: true, opacity: 0.55, side: THREE.DoubleSide, depthWrite: false,
+        });
+        const ring = new THREE.Mesh(
+          new THREE.RingGeometry(meshRadius * 0.88, meshRadius, 32),
+          ringMat,
+        );
+        ring.rotation.x = -Math.PI / 2;
+        ring.position.set(x, y + 0.09, z);
+        hotspotGroup.add(ring);
+
+        // Label sprite above zone
+        const colorHex = '#' + color.toString(16).padStart(6, '0');
+        const label = makeTextSprite(zone.riskLevel.toUpperCase(), colorHex);
+        label.position.set(x, y + 1.2, z);
+        hotspotGroup.add(label);
+      });
+    }
+
+    function buildPlacementMeshes(pl: PlacementSuggestions) {
+      // Sensor suggestions — teal diamond + ring
+      pl.sensors.forEach((s) => {
+        const { x, z } = latLonToMesh(s.lat, s.lon, YOSEMITE_BBOX, SZ);
+        const y = surf(x, z);
+
+        const gem = new THREE.Mesh(
+          new THREE.OctahedronGeometry(0.09, 0),
+          new THREE.MeshBasicMaterial({ color: 0x00FFCC }),
+        );
+        gem.position.set(x, y, z);
+        placementGroup.add(gem);
+
+        const ringMat = new THREE.MeshBasicMaterial({
+          color: 0x00FFCC, transparent: true, opacity: 0.40, side: THREE.DoubleSide,
+        });
+        const ring = new THREE.Mesh(new THREE.RingGeometry(0.13, 0.19, 14), ringMat);
+        ring.rotation.x = -Math.PI / 2;
+        ring.position.set(x, y + 0.01, z);
+        placementGroup.add(ring);
+
+        const sprite = makeTextSprite(s.label, '#00FFCC');
+        sprite.position.set(x, y + 0.8, z);
+        placementGroup.add(sprite);
+      });
+
+      // Call box suggestions — magenta wireframe box
+      pl.callBoxes.forEach((cb) => {
+        const { x, z } = latLonToMesh(cb.lat, cb.lon, YOSEMITE_BBOX, SZ);
+        const y = surf(x, z);
+
+        const boxEdges = new THREE.EdgesGeometry(new THREE.BoxGeometry(0.18, 0.18, 0.18));
+        const frame = new THREE.LineSegments(
+          boxEdges,
+          new THREE.LineBasicMaterial({ color: 0xFF44AA }),
+        );
+        frame.position.set(x, y + 0.09, z);
+        placementGroup.add(frame);
+
+        const sprite = makeTextSprite(cb.label, '#FF44AA');
+        sprite.position.set(x, y + 0.9, z);
+        placementGroup.add(sprite);
+      });
+    }
+
     // ── Render loop ───────────────────────────────────────────────────
     let startT: number | null = null;
     let prevElevSource: string | null = null;
@@ -462,6 +590,27 @@ export default function TerrainScene({ layers, viewMode }: Props) {
         pulseMat.opacity = 0.2 + Math.sin(t * 3 + phase) * 0.2;
         pulse.scale.setScalar(1 + Math.sin(t * 2.5 + phase) * 0.5);
       });
+
+      // Hotspot zones + placement suggestions
+      const hKey = hotspotRef.current?.generatedAt ?? '';
+      if (hKey !== prevHotspotKey) {
+        prevHotspotKey = hKey;
+        clearGroup(hotspotGroup);
+        clearGroup(placementGroup);
+        if (hotspotRef.current) {
+          buildHotspotMeshes(hotspotRef.current.hotspots);
+          if (placementRef.current) buildPlacementMeshes(placementRef.current);
+        }
+      }
+      hotspotGroup.visible = L.hotspots;
+      placementGroup.visible = L.hotspots;
+
+      // Pulse hotspot fill discs
+      if (L.hotspots) {
+        hotspotAnims.forEach(({ mat, phase, base }) => {
+          mat.opacity = base + Math.sin(t * 1.4 + phase) * 0.07;
+        });
+      }
 
       controls.update();
       renderer.render(scene, camera);

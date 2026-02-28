@@ -954,3 +954,19 @@ footer {
 .ev-ok   { font-size: 0.6rem; color: var(--db-text); letter-spacing: 0.04em; }
 .ev-warn { font-size: 0.6rem; color: var(--db-amber); letter-spacing: 0.04em; }
 .ev-crit { font-size: 0.6rem; color: var(--db-red); letter-spacing: 0.04em; }
+
+/* HOTSPOT BUTTON */
+.layer-toggle.load-action {
+  color: var(--db-amber);
+  border: 1px solid rgba(255,140,66,0.35);
+  padding: 1px 7px;
+  background: rgba(255,140,66,0.05);
+}
+.layer-toggle.load-action:hover { background: rgba(255,140,66,0.12); color: var(--db-text); }
+.layer-toggle.predicting {
+  color: var(--db-muted);
+  cursor: wait;
+  animation: dotPulse 0.7s ease-in-out infinite;
+  pointer-events: none;
+}
+.layer-swatch.sq { border-radius: 1px; }
