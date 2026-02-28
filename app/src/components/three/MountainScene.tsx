@@ -1,0 +1,401 @@
+"use client";
+
+import { useEffect, useRef } from "react";
+import * as THREE from "three";
+import { useScroll, useSpring } from "framer-motion";
+import { mountainH } from "@/lib/elevation/fallbackTerrain";
+
+function createLabelSprite(text: string, color: string): THREE.Sprite {
+  const canvas = document.createElement("canvas");
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return new THREE.Sprite();
+
+  const fontSize = 64;
+  ctx.font = `bold ${fontSize}px sans-serif`;
+  const textMetrics = ctx.measureText(text);
+
+  const w = textMetrics.width + 40;
+  const h = fontSize * 1.6;
+  canvas.width = w;
+  canvas.height = h;
+
+  ctx.font = `bold ${fontSize}px sans-serif`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillStyle = color;
+  ctx.fillText(text, w / 2, h / 2);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.minFilter = THREE.LinearFilter;
+
+  const material = new THREE.SpriteMaterial({
+    map: texture,
+    transparent: true,
+    depthTest: false,
+    depthWrite: false,
+  });
+
+  const sprite = new THREE.Sprite(material);
+  const scale = 0.012; // Adjust size in world units
+  sprite.scale.set(w * scale, h * scale, 1);
+  return sprite;
+}
+
+export default function MountainScene() {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const { scrollYProgress } = useScroll();
+  const smoothScroll = useSpring(scrollYProgress, {
+    stiffness: 50,
+    damping: 20,
+    restDelta: 0.001,
+  });
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const renderer = new THREE.WebGLRenderer({
+      canvas,
+      antialias: true,
+      alpha: false,
+    });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+    renderer.setClearColor(0x030a10, 1);
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.0;
+
+    const scene = new THREE.Scene();
+    scene.fog = new THREE.FogExp2(0x030a10, 0.02);
+
+    const camera = new THREE.PerspectiveCamera(
+      50,
+      window.innerWidth / window.innerHeight,
+      0.1,
+      400,
+    );
+
+    // Initial camera state
+    const CAM_START = new THREE.Vector3(18, 12, 24);
+    const CAM_LOOK_START = new THREE.Vector3(0, 2, 0);
+    camera.position.copy(CAM_START);
+    camera.lookAt(CAM_LOOK_START);
+
+    // Lighting
+    scene.add(new THREE.AmbientLight(0x0d1e35, 1.5));
+    const moon = new THREE.DirectionalLight(0x4d7acc, 1.2);
+    moon.position.set(-10, 20, 5);
+    scene.add(moon);
+
+    const rimLeft = new THREE.DirectionalLight(0xff6020, 0.4);
+    rimLeft.position.set(10, 2, -5);
+    scene.add(rimLeft);
+
+    const rimTop = new THREE.DirectionalLight(0x203050, 0.6);
+    rimTop.position.set(0, 15, 0);
+    scene.add(rimTop);
+
+    // Stars
+    {
+      const count = 3000;
+      const pos = new Float32Array(count * 3);
+      for (let i = 0; i < count; i++) {
+        const theta = Math.random() * Math.PI * 2;
+        const phi = Math.acos(2 * Math.random() - 1);
+        const r = 100 + Math.random() * 50;
+        pos[i * 3] = r * Math.sin(phi) * Math.cos(theta);
+        pos[i * 3 + 1] = Math.abs(r * Math.sin(phi) * Math.sin(theta)) + 10;
+        pos[i * 3 + 2] = r * Math.cos(phi);
+      }
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+      scene.add(
+        new THREE.Points(
+          geo,
+          new THREE.PointsMaterial({
+            color: 0xccddff,
+            size: 0.3,
+            transparent: true,
+            opacity: 0.6,
+            sizeAttenuation: true,
+          }),
+        ),
+      );
+    }
+
+    // Terrain
+    const RES = 96,
+      SIZE = 28;
+    const terrainGeo = new THREE.PlaneGeometry(SIZE, SIZE, RES - 1, RES - 1);
+    terrainGeo.rotateX(-Math.PI / 2);
+    const tPos = terrainGeo.attributes.position;
+    const vColors = new Float32Array(tPos.count * 3);
+
+    for (let i = 0; i < tPos.count; i++) {
+      const x = tPos.getX(i),
+        z = tPos.getZ(i);
+      const h = mountainH(x * 0.8, z * 0.8);
+      tPos.setY(i, h);
+
+      const t = Math.min(1, h / 9.0);
+      let r, g, b;
+      if (t < 0.05) {
+        r = 0.03;
+        g = 0.06;
+        b = 0.05;
+      } else if (t < 0.2) {
+        r = 0.05 + t * 0.1;
+        g = 0.1 + t * 0.15;
+        b = 0.08 + t * 0.05;
+      } else if (t < 0.5) {
+        r = 0.15 + t * 0.2;
+        g = 0.18 + t * 0.2;
+        b = 0.2 + t * 0.3;
+      } else {
+        r = 0.6 + (t - 0.5);
+        g = 0.65 + (t - 0.5);
+        b = 0.8 + (t - 0.5);
+      }
+      vColors[i * 3] = r;
+      vColors[i * 3 + 1] = g;
+      vColors[i * 3 + 2] = b;
+    }
+    terrainGeo.setAttribute("color", new THREE.BufferAttribute(vColors, 3));
+    terrainGeo.computeVertexNormals();
+    scene.add(
+      new THREE.Mesh(
+        terrainGeo,
+        new THREE.MeshLambertMaterial({ vertexColors: true }),
+      ),
+    );
+
+    // Trail calculation
+    function surfaceY(x: number, z: number) {
+      return mountainH(x * 0.8, z * 0.8);
+    }
+
+    const waypoints = [
+      new THREE.Vector3(0.0, surfaceY(0.0, -3.5) + 0.1, -3.5),
+      new THREE.Vector3(1.2, surfaceY(1.2, -2.5) + 0.1, -2.5),
+      new THREE.Vector3(2.5, surfaceY(2.5, -1.0) + 0.2, -1.0),
+      new THREE.Vector3(1.8, surfaceY(1.8, 0.5) + 0.3, 0.5),
+      new THREE.Vector3(0.0, surfaceY(0.0, 1.2) + 0.5, 1.2),
+      new THREE.Vector3(-1.5, surfaceY(-1.5, 2.0) + 0.8, 2.0),
+      new THREE.Vector3(-2.0, surfaceY(-2.0, 3.5) + 1.2, 3.5),
+    ];
+    const curve = new THREE.CatmullRomCurve3(
+      waypoints,
+      false,
+      "catmullrom",
+      0.2,
+    );
+
+    const TRAIL_PTS = 400;
+    const curvePts = curve.getPoints(TRAIL_PTS - 1);
+    const trailPos = new Float32Array(TRAIL_PTS * 3);
+    curvePts.forEach((p, i) => {
+      trailPos[i * 3] = p.x;
+      trailPos[i * 3 + 1] = p.y;
+      trailPos[i * 3 + 2] = p.z;
+    });
+
+    const trailGeo = new THREE.BufferGeometry();
+    trailGeo.setAttribute("position", new THREE.BufferAttribute(trailPos, 3));
+    trailGeo.setDrawRange(0, 0);
+
+    const trailMat = new THREE.LineBasicMaterial({
+      color: 0xff8c42,
+      transparent: true,
+      opacity: 1.0,
+      linewidth: 2,
+    });
+    const trailLine = new THREE.Line(trailGeo, trailMat);
+    scene.add(trailLine);
+
+    // Drone Group
+    const droneGroup = new THREE.Group();
+    const droneBody = new THREE.Mesh(
+      new THREE.SphereGeometry(0.12, 8, 8),
+      new THREE.MeshBasicMaterial({ color: 0xffffff }),
+    );
+    const coneGeo = new THREE.ConeGeometry(0.8, 2.5, 4, 1, true);
+    coneGeo.translate(0, -1.25, 0);
+    const coneMat = new THREE.MeshBasicMaterial({
+      color: 0x22ff88,
+      transparent: true,
+      opacity: 0.0,
+      wireframe: true,
+      depthWrite: false,
+    });
+    const scanCone = new THREE.Mesh(coneGeo, coneMat);
+    droneGroup.add(droneBody);
+    droneGroup.add(scanCone);
+    droneGroup.visible = false;
+    scene.add(droneGroup);
+
+    // Sensors
+    const sensorPositions: [number, number][] = [
+      [-3.0, 1.5],
+      [-1.5, 0.0],
+      [1.0, -1.5],
+      [3.0, 0.5],
+      [1.5, 3.0],
+      [-1.0, 4.0],
+      [3.5, 2.5],
+      [-3.5, -1.5],
+    ];
+    const sensors: { mesh: THREE.Mesh; phase: number; baseScale: number }[] =
+      [];
+
+    sensorPositions.forEach(([sx, sz], i) => {
+      const sy = surfaceY(sx, sz);
+      const mesh = new THREE.Mesh(
+        new THREE.SphereGeometry(0.08, 6, 6),
+        new THREE.MeshBasicMaterial({
+          color: 0x22ff88,
+          transparent: true,
+          opacity: 0,
+        }),
+      );
+      mesh.position.set(sx, sy, sz);
+      scene.add(mesh);
+      sensors.push({ mesh, phase: i * 0.5, baseScale: 1 });
+    });
+
+    // Hiker Group
+    const hikerGroup = new THREE.Group();
+    // Head
+    const headGeo = new THREE.SphereGeometry(0.12, 8, 8);
+    const headMat = new THREE.MeshLambertMaterial({ color: 0xffccaa });
+    const head = new THREE.Mesh(headGeo, headMat);
+    head.position.y = 0.4;
+    hikerGroup.add(head);
+    // Body
+    const bodyGeo = new THREE.CylinderGeometry(0.12, 0.15, 0.4, 8);
+    const bodyMat = new THREE.MeshLambertMaterial({ color: 0xcc4422 });
+    const body = new THREE.Mesh(bodyGeo, bodyMat);
+    body.position.y = 0.2;
+    hikerGroup.add(body);
+
+    // Position hiker at 0.9 along curve
+    const hikerPos = curve.getPointAt(0.9);
+    hikerPos.y = surfaceY(hikerPos.x, hikerPos.z);
+    hikerGroup.position.copy(hikerPos);
+    scene.add(hikerGroup);
+
+    // Labels
+    const labelAlert = createLabelSprite("ALERT", "#ff3333");
+    labelAlert.position.copy(hikerPos).add(new THREE.Vector3(0, 1.2, 0));
+    labelAlert.visible = false;
+    scene.add(labelAlert);
+
+    const labelSearch = createLabelSprite("SEARCH", "#ffaa00");
+    labelSearch.visible = false;
+    scene.add(labelSearch);
+
+    const labelLocated = createLabelSprite("LOCATED", "#44ff44");
+    labelLocated.position.copy(hikerPos).add(new THREE.Vector3(0, 1.2, 0));
+    labelLocated.visible = false;
+    scene.add(labelLocated);
+
+    let rafId: number;
+    const clock = new THREE.Clock();
+
+    function animate() {
+      const time = clock.getElapsedTime();
+      const scroll = smoothScroll.get();
+
+      // SIMPLIFIED ROUTE ANIMATION
+      // Just camera flying along trail based on scroll
+
+      // 1. Camera Logic
+      const targetPos = new THREE.Vector3();
+      const targetLook = new THREE.Vector3();
+
+      if (scroll < 0.1) {
+        // Hero Phase
+        const angle = scroll * 0.5;
+        targetPos.set(
+          CAM_START.x * Math.cos(angle) + CAM_START.z * Math.sin(angle),
+          CAM_START.y - scroll * 5,
+          CAM_START.z * Math.cos(angle) - CAM_START.x * Math.sin(angle),
+        );
+        targetLook.copy(CAM_LOOK_START);
+
+        droneGroup.visible = false;
+        trailGeo.setDrawRange(0, 0);
+      } else {
+        // Route Phase
+        // Map remaining scroll (0.1 -> 1.0) to trail progress (0 -> 1)
+        const routeProgress = Math.min(1, Math.max(0, (scroll - 0.1) / 0.9));
+
+        const pointOnCurve = curve.getPointAt(routeProgress);
+
+        // Camera follows
+        targetPos.copy(pointOnCurve).add(new THREE.Vector3(5, 6, 5));
+        targetLook.copy(pointOnCurve);
+
+        // Draw Trail
+        const drawIndex = Math.floor(routeProgress * TRAIL_PTS);
+        trailGeo.setDrawRange(0, drawIndex);
+
+        // Visual Marker (Drone as marker)
+        droneGroup.visible = true;
+        droneGroup.position.copy(pointOnCurve);
+
+        // Hide Labels for cleaner look
+        labelAlert.visible = false;
+        labelSearch.visible = false;
+        labelLocated.visible = false;
+      }
+
+      // Smooth Camera
+      camera.position.lerp(targetPos, 0.05);
+      camera.up.set(0, 1, 0);
+
+      const currentLook = new THREE.Vector3();
+      camera.getWorldDirection(currentLook);
+      const targetDir = new THREE.Vector3()
+        .subVectors(targetLook, camera.position)
+        .normalize();
+      const smoothDir = currentLook.lerp(targetDir, 0.05);
+      camera.lookAt(new THREE.Vector3().copy(camera.position).add(smoothDir));
+
+      // Animation for marker
+      if (droneGroup.visible) {
+        scanCone.rotation.y = time * 2;
+        droneGroup.position.y += Math.sin(time * 3) * 0.05;
+      }
+
+      // Static Hiker
+      hikerGroup.rotation.x = 0;
+      hikerGroup.position.y = hikerPos.y;
+
+      // Pulse Sensors
+      sensors.forEach((s) => {
+        const active = (Math.sin(time * 2 + s.phase) + 1) / 2;
+        (s.mesh.material as THREE.MeshBasicMaterial).opacity = active * 0.8;
+      });
+
+      renderer.render(scene, camera);
+      rafId = requestAnimationFrame(animate);
+    }
+
+    animate();
+
+    const onResize = () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    };
+    window.addEventListener("resize", onResize);
+
+    return () => {
+      cancelAnimationFrame(rafId);
+      window.removeEventListener("resize", onResize);
+      renderer.dispose();
+    };
+  }, [smoothScroll]); // Eslint usually warns about missing deps but smoothScroll is a ref-like object
+
+  return <canvas ref={canvasRef} className="mountain-canvas" />;
+}
