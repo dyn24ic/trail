@@ -1,0 +1,32 @@
+# ── Next.js (app/) ──────────────────────────────
+node_modules/
+.next/
+out/
+dist/
+.env.local
+.env*.local
+
+# ── Python / Django (frontend/) ─────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+frontend/venv/
+frontend/.venv/
+frontend/*.sqlite3
+frontend/dem_cache/
+frontend/.env
+frontend/staticfiles/
+frontend/media/
+
+# ── macOS ────────────────────────────────────────
+.DS_Store
+
+# ── IDE ──────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+
+# ── Logs ─────────────────────────────────────────
+*.log
