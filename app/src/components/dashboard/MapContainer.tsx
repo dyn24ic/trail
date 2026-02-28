@@ -2,6 +2,8 @@
 
 import { useState } from 'react';
 import dynamic from 'next/dynamic';
+import { usePredictHotspots } from '@/lib/hotspots/usePredictHotspots';
+import { YOSEMITE_BBOX } from '@/data/trailBbox';
 
 const TerrainScene = dynamic(() => import('@/components/three/TerrainScene'), {
   ssr: false,
@@ -15,8 +17,11 @@ export default function MapContainer() {
     incidents: true,
     zones: true,
     landmarks: true,
+    hotspots: true,
   });
   const [viewMode, setViewMode] = useState<'3d' | 'wireframe'>('3d');
+
+  const { data: hotspotData, placement: placementData, load, status } = usePredictHotspots(YOSEMITE_BBOX);
 
   const toggle = (name: keyof typeof layers) => {
     setLayers((prev) => ({ ...prev, [name]: !prev[name] }));
@@ -46,6 +51,27 @@ export default function MapContainer() {
         </div>
 
         <div className="map-layers">
+          {/* AI hotspot button — idle → load, loading → predicting, loaded/error → toggle */}
+          {status === 'idle' && (
+            <div className="layer-toggle load-action" onClick={load}>
+              AI HOTSPOTS &#9654;
+            </div>
+          )}
+          {status === 'loading' && (
+            <div className="layer-toggle predicting">
+              PREDICTING&#8230;
+            </div>
+          )}
+          {(status === 'loaded' || status === 'error') && (
+            <div
+              className={`layer-toggle${layers.hotspots ? '' : ' off'}`}
+              onClick={() => toggle('hotspots')}
+            >
+              <span className="layer-swatch" style={{ background: 'var(--db-amber)' }}></span>
+              hotspots
+            </div>
+          )}
+
           {([
             ['sensors',   'sensors',   'var(--db-green)'],
             ['drones',    'drones',    'var(--db-amber)'],
@@ -65,7 +91,12 @@ export default function MapContainer() {
         </div>
       </div>
 
-      <TerrainScene layers={layers} viewMode={viewMode} />
+      <TerrainScene
+        layers={layers}
+        viewMode={viewMode}
+        hotspotData={hotspotData}
+        placementData={placementData}
+      />
 
       <div className="scan-indicator">
         <span className="status-dot"></span>
@@ -90,6 +121,9 @@ export default function MapContainer() {
         <div className="legend-item"><span className="legend-dot" style={{ background: 'var(--db-yellow)' }}></span>Incident · Warning</div>
         <div className="legend-item"><span className="legend-line" style={{ background: 'rgba(74,159,212,0.6)' }}></span>Search Zone</div>
         <div className="legend-item"><span className="legend-dot" style={{ background: '#FFD700' }}></span>Landmark</div>
+        <div className="legend-item"><span className="legend-dot" style={{ background: 'var(--db-amber)' }}></span>Hotspot Zone</div>
+        <div className="legend-item"><span className="legend-dot" style={{ background: '#00FFCC' }}></span>Sensor Suggestion</div>
+        <div className="legend-item"><span className="legend-dot sq" style={{ background: '#FF44AA' }}></span>Call Box Suggestion</div>
       </div>
 
       <div id="source-badge" className="source-badge procedural">Procedural</div>
