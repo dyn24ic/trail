@@ -1,9 +1,11 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import { usePredictHotspots } from '@/lib/hotspots/usePredictHotspots';
 import { YOSEMITE_BBOX } from '@/data/trailBbox';
+import type { DangerZone } from '@/types/backend';
+import type { CameraControls } from '@/components/three/TerrainScene';
 
 const TerrainScene = dynamic(() => import('@/components/three/TerrainScene'), {
   ssr: false,
@@ -21,83 +23,87 @@ export default function MapContainer() {
     osm: false,
   });
   const [viewMode, setViewMode] = useState<'3d' | 'wireframe'>('3d');
+  const [focusMode, setFocusMode] = useState(false);
+  const [dangerZones, setDangerZones] = useState<DangerZone[]>([]);
+  const cameraControlsRef = useRef<CameraControls | null>(null);
 
-  const { data: hotspotData, placement: placementData, load, status } = usePredictHotspots(YOSEMITE_BBOX);
+  const hotspots = usePredictHotspots(YOSEMITE_BBOX);
 
   const toggle = (name: keyof typeof layers) => {
     setLayers((prev) => ({ ...prev, [name]: !prev[name] }));
   };
 
+  // Fetch backend terrain danger zones for the Yosemite bounding box
+  useEffect(() => {
+    const { west, south, east, north } = YOSEMITE_BBOX;
+    fetch(`/api/terrain?west=${west}&south=${south}&east=${east}&north=${north}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (data?.status === 'ok' && Array.isArray(data.danger_zones)) {
+          setDangerZones(data.danger_zones);
+        }
+      })
+      .catch(() => {/* silently ignore if backend unavailable */});
+  }, []);
+
+  const layerDefs: [keyof typeof layers, string, string][] = [
+    ['sensors',   'Sensors',   'var(--db-green)'],
+    ['drones',    'Drones',    'var(--db-amber)'],
+    ['incidents', 'Incidents', 'var(--db-red)'],
+    ['zones',     'Zones',     'var(--db-blue)'],
+    ['landmarks', 'Landmarks', '#FFD700'],
+    ['osm',       'Satellite', '#88BBFF'],
+  ];
+
   return (
-    <div className="map-container">
-      <div className="map-topbar">
-        <div className="map-tab active">3D Terrain</div>
-        <div className="map-tab">Risk Heatmap</div>
-        <div className="map-tab">Incident Log</div>
-
-        {/* View mode toggle */}
-        <div className="view-toggle">
+    <div className="map-container" style={{ position: 'absolute', inset: 0 }}>
+      {/* Floating vertical toolbar */}
+      <div className="map-toolbar">
+        <span className="tb-section-lbl">LAYERS</span>
+        {layerDefs.map(([key, label, color]) => (
           <button
-            className={`view-btn${viewMode === '3d' ? ' active' : ''}`}
-            onClick={() => setViewMode('3d')}
+            key={key}
+            className={`tb-layer-btn${layers[key] ? ' on' : ''}`}
+            style={{ '--lc': color } as React.CSSProperties}
+            onClick={() => toggle(key)}
           >
-            3D
+            <span className="tb-dot" />{label}
           </button>
-          <button
-            className={`view-btn${viewMode === 'wireframe' ? ' active' : ''}`}
-            onClick={() => setViewMode('wireframe')}
-          >
-            Wire
-          </button>
-        </div>
-
-        <div className="map-layers">
-          {/* AI hotspot button — idle → load, loading → predicting, loaded/error → toggle */}
-          {status === 'idle' && (
-            <div className="layer-toggle load-action" onClick={load}>
-              AI HOTSPOTS &#9654;
-            </div>
-          )}
-          {status === 'loading' && (
-            <div className="layer-toggle predicting">
-              PREDICTING&#8230;
-            </div>
-          )}
-          {(status === 'loaded' || status === 'error') && (
-            <div
-              className={`layer-toggle${layers.hotspots ? '' : ' off'}`}
-              onClick={() => toggle('hotspots')}
-            >
-              <span className="layer-swatch" style={{ background: 'var(--db-amber)' }}></span>
-              hotspots
-            </div>
-          )}
-
-          {([
-            ['sensors',   'sensors',   'var(--db-green)'],
-            ['drones',    'drones',    'var(--db-amber)'],
-            ['incidents', 'incidents', 'var(--db-red)'],
-            ['zones',     'zones',     'var(--db-blue)'],
-            ['landmarks', 'landmarks', '#FFD700'],
-            ['osm',       'OSM map',   '#88BBFF'],
-          ] as const).map(([key, label, color]) => (
-            <div
-              key={key}
-              className={`layer-toggle${layers[key as keyof typeof layers] ? '' : ' off'}`}
-              onClick={() => toggle(key as keyof typeof layers)}
-            >
-              <span className="layer-swatch" style={{ background: color }}></span>
-              {label}
-            </div>
-          ))}
+        ))}
+        <div className="tb-sep" />
+        <span className="tb-section-lbl">VIEW</span>
+        <button className={`tb-view-btn${viewMode === '3d' ? ' on' : ''}`} onClick={() => setViewMode('3d')}>3D</button>
+        <button className={`tb-view-btn${viewMode === 'wireframe' ? ' on' : ''}`} onClick={() => setViewMode('wireframe')}>Wire</button>
+        <div className="tb-sep" />
+        <button
+          className={`tb-focus-btn${focusMode ? ' on' : ''}`}
+          onClick={() => setFocusMode(v => !v)}
+          title="Click terrain to zoom in"
+        >
+          {focusMode ? '⊕ Active' : '⊕ Focus'}
+        </button>
+        <div className="tb-sep" />
+        <div
+          className={`layer-toggle${hotspots.status === 'loading' ? ' predicting' : ' load-action'}`}
+          onClick={hotspots.status === 'idle' || hotspots.status === 'error' ? hotspots.load : undefined}
+        >
+          <span className="layer-swatch sq" style={{ background: '#ff8c42' }} />
+          {hotspots.status === 'loading'
+            ? 'Predicting…'
+            : hotspots.status === 'loaded'
+              ? 'Hotspots ✓'
+              : 'Load Hotspots'}
         </div>
       </div>
 
       <TerrainScene
         layers={layers}
         viewMode={viewMode}
-        hotspotData={hotspotData}
-        placementData={placementData}
+        focusMode={focusMode}
+        dangerZones={dangerZones}
+        hotspotData={hotspots.data}
+        placementData={hotspots.placement}
+        onControlsReady={(ctrl) => { cameraControlsRef.current = ctrl; }}
       />
 
       <div className="scan-indicator">
@@ -106,7 +112,7 @@ export default function MapContainer() {
       </div>
 
       <div className="map-hint">
-        drag to orbit · scroll to zoom · right-drag to pan
+        🖱 scroll / pinch to zoom &nbsp;·&nbsp; drag to orbit &nbsp;·&nbsp; ↑↓←→ to pan
       </div>
 
       <div className="map-coords">
@@ -123,11 +129,7 @@ export default function MapContainer() {
         <div className="legend-item"><span className="legend-dot" style={{ background: 'var(--db-yellow)' }}></span>Incident · Warning</div>
         <div className="legend-item"><span className="legend-line" style={{ background: 'rgba(74,159,212,0.6)' }}></span>Search Zone</div>
         <div className="legend-item"><span className="legend-dot" style={{ background: '#FFD700' }}></span>Landmark</div>
-        <div className="legend-item"><span className="legend-dot" style={{ background: 'var(--db-amber)' }}></span>Hotspot Zone</div>
-        <div className="legend-item"><span className="legend-dot" style={{ background: '#00FFCC' }}></span>Sensor Suggestion</div>
-        <div className="legend-item"><span className="legend-dot sq" style={{ background: '#FF44AA' }}></span>Call Box Suggestion</div>
         <div className="legend-item"><span className="legend-line" style={{ background: '#88BBFF' }}></span>OSM Overlay</div>
-
       </div>
 
       <div id="source-badge" className="source-badge procedural">Procedural</div>

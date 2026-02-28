@@ -1,11 +1,15 @@
 "use client";
 
 import { useEffect } from "react";
-import Link from "next/link";
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnimFn = (...args: any[]) => any;
 
-export default function HeroOverlay() {
+/**
+ * Handles DOM animations for landing page elements
+ * This component doesn't render anything - it only sets up animations
+ */
+export default function AnimationController() {
   useEffect(() => {
     let animate: AnimFn, stagger: AnimFn, inView: AnimFn;
 
@@ -16,6 +20,7 @@ export default function HeroOverlay() {
 
       const q = (sel: string) => Array.from(document.querySelectorAll(sel));
 
+      // Initial page load animations
       animate(
         q(".landing-nav"),
         { opacity: [0, 1] },
@@ -56,6 +61,7 @@ export default function HeroOverlay() {
         { duration: 0.8, delay: 2.8 },
       );
 
+      // Scroll-triggered animations
       inView(
         ".section-header",
         ({ target }: { target: Element }) => {
@@ -126,73 +132,6 @@ export default function HeroOverlay() {
     });
   }, []);
 
-  return (
-    <>
-      {/* Nav */}
-      <nav className="landing-nav">
-        <div className="logo">
-          tr<span className="ai-letters">AI</span>l
-        </div>
-        <div className="nav-right">
-          <a href="#features" className="nav-link">
-            System
-          </a>
-          <Link href="/dashboard" className="nav-link cta">
-            Operator Dashboard →
-          </Link>
-        </div>
-      </nav>
-
-      {/* Hero */}
-      <div className="hero">
-        <div className="hero-eyebrow">
-          <span className="eyebrow-line"></span>
-          Trail Guardian &nbsp;·&nbsp; Advanced SAR Systems
-        </div>
-        <h1 className="hero-title">
-          Autonomous
-          <br />
-          Search &amp; Rescue
-          <br />
-          <span className="accent">Intelligence.</span>
-        </h1>
-        <p className="hero-sub">
-          Reduce response times by 80% with AI-driven detection, thermal drone
-          deployment, and optimized responder routing for wilderness
-          environments.
-        </p>
-        <div className="hero-actions">
-          <Link href="/dashboard" className="btn-primary">
-            Launch Dashboard
-          </Link>
-          <a href="#features" className="btn-ghost">
-            System Capabilities <span className="arr">→</span>
-          </a>
-        </div>
-      </div>
-
-      {/* Right stats */}
-      <div className="hero-stats">
-        <div className="stat">
-          <span className="stat-num">5-15</span>
-          <span className="stat-lbl">min response time</span>
-        </div>
-        <div className="stat">
-          <span className="stat-num">94%</span>
-          <span className="stat-lbl">zone prediction accuracy</span>
-        </div>
-        <div className="stat">
-          <span className="stat-num">-85%</span>
-          <span className="stat-lbl">search cost</span>
-        </div>
-      </div>
-
-      {/* Scroll hint */}
-      <div className="scroll-hint">
-        <div className="mouse">
-          <div className="wheel"></div>
-        </div>
-      </div>
-    </>
-  );
+  // This component doesn't render anything
+  return null;
 }

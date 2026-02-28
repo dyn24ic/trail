@@ -1,0 +1,171 @@
+// TypeScript types for the trAIl Django backend API responses
+
+export interface WeatherConditions {
+  fog: boolean;
+  storm: boolean;
+  heavy_rain: boolean;
+  snow: boolean;
+}
+
+export interface WeatherRoutingFactors {
+  ground_speed_factor: number;
+  helicopter_speed_factor: number;
+  weather_hazard: number;
+}
+
+export interface Weather {
+  temperature_c: number;
+  feels_like_c: number;
+  humidity_pct: number;
+  pressure_hpa: number;
+  wind_speed_ms: number;
+  wind_direction_deg: number;
+  visibility_m: number;
+  precipitation_mm_1h: number;
+  description: string;
+  conditions: WeatherConditions;
+  routing_factors: WeatherRoutingFactors;
+}
+
+export interface WeatherResponse {
+  status: string;
+  weather: Weather;
+  location: { lat: number; lon: number };
+}
+
+export interface DangerZone {
+  center: { lat: number; lon: number };
+  bounds: {
+    sw: { lat: number; lon: number };
+    ne: { lat: number; lon: number };
+  };
+  hazard_score: number;
+  avg_slope_deg: number;
+  type: string;
+}
+
+export interface TerrainStats {
+  min_elevation: number;
+  max_elevation: number;
+  mean_elevation: number;
+  max_slope_deg: number;
+  mean_slope_deg: number;
+}
+
+export interface TerrainResponse {
+  status: string;
+  bbox: { west: number; south: number; east: number; north: number };
+  stats: TerrainStats;
+  danger_zones: DangerZone[];
+  elevation_grid_sample: number[][];
+  grid_size: { rows: number; cols: number };
+}
+
+export interface RouteWaypoint {
+  lat: number;
+  lon: number;
+  elevation_m: number;
+  slope_deg: number;
+  hazard: number;
+  colour: string;
+  index: number;
+}
+
+export interface ElevationProfilePoint {
+  distance_m: number;
+  elevation_m: number;
+  lat: number;
+  lon: number;
+}
+
+export interface HelicopterRecommendation {
+  recommended: boolean;
+  safety_score: number;
+  threshold: number;
+  helicopter_flight_ok: boolean;
+  reasons: string[];
+}
+
+export interface RouteStats {
+  avg_slope_deg: number;
+  max_elevation_m: number;
+  min_elevation_m: number;
+  elevation_gain_m?: number;
+  clearance_required_m?: number;
+}
+
+export interface FlightConditions {
+  ok: boolean;
+  wind_speed_ms: number;
+  visibility_m: number;
+  storm: boolean;
+}
+
+export interface Route {
+  route_type: string;
+  severity: number;
+  waypoints: RouteWaypoint[];
+  total_distance_m: number;
+  eta_minutes: number;
+  effective_speed_kmh: number;
+  elevation_profile: ElevationProfilePoint[];
+  danger_zones: DangerZone[];
+  safety_score: number;
+  helicopter_recommendation: HelicopterRecommendation;
+  route_colour: string;
+  stats: RouteStats;
+  flight_conditions?: FlightConditions;
+}
+
+export interface RouteAnalysis {
+  summary: string;
+  hazards: string[];
+  recommendations: string[];
+  helicopter_advice: string;
+  safety_assessment: string;
+  turn_by_turn: string[];
+  model: string;
+  llm_used: boolean;
+}
+
+export interface RouteCalculateResponse {
+  status: string;
+  request: {
+    responder: { lat: number; lon: number };
+    victim: { lat: number; lon: number };
+    severity: number;
+    route_type: string;
+  };
+  route: Route;
+  weather: Weather;
+  terrain_stats: TerrainStats;
+  analysis: RouteAnalysis;
+}
+
+export interface RouteCompareResponse {
+  status: string;
+  request: {
+    responder: { lat: number; lon: number };
+    victim: { lat: number; lon: number };
+    severity: number;
+  };
+  recommended_type: 'ground' | 'helicopter';
+  ground: {
+    route: Route;
+    analysis: RouteAnalysis;
+  };
+  helicopter: {
+    route: Route;
+    analysis: RouteAnalysis;
+  };
+  weather: Weather;
+  terrain_stats: TerrainStats;
+  helicopter_recommendation: HelicopterRecommendation;
+}
+
+export interface BackendHealthResponse {
+  status: string;
+  service: string;
+  openai_configured: boolean;
+  openweather_configured: boolean;
+}

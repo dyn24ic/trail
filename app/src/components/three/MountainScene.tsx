@@ -5,6 +5,42 @@ import * as THREE from "three";
 import { useScroll, useSpring } from "framer-motion";
 import { mountainH } from "@/lib/elevation/fallbackTerrain";
 
+function createLabelSprite(text: string, color: string): THREE.Sprite {
+  const canvas = document.createElement("canvas");
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return new THREE.Sprite();
+
+  const fontSize = 64;
+  ctx.font = `bold ${fontSize}px sans-serif`;
+  const textMetrics = ctx.measureText(text);
+
+  const w = textMetrics.width + 40;
+  const h = fontSize * 1.6;
+  canvas.width = w;
+  canvas.height = h;
+
+  ctx.font = `bold ${fontSize}px sans-serif`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillStyle = color;
+  ctx.fillText(text, w / 2, h / 2);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.minFilter = THREE.LinearFilter;
+
+  const material = new THREE.SpriteMaterial({
+    map: texture,
+    transparent: true,
+    depthTest: false,
+    depthWrite: false,
+  });
+
+  const sprite = new THREE.Sprite(material);
+  const scale = 0.012; // Adjust size in world units
+  sprite.scale.set(w * scale, h * scale, 1);
+  return sprite;
+}
+
 export default function MountainScene() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const { scrollYProgress } = useScroll();
@@ -226,6 +262,42 @@ export default function MountainScene() {
       sensors.push({ mesh, phase: i * 0.5, baseScale: 1 });
     });
 
+    // Hiker Group
+    const hikerGroup = new THREE.Group();
+    // Head
+    const headGeo = new THREE.SphereGeometry(0.12, 8, 8);
+    const headMat = new THREE.MeshLambertMaterial({ color: 0xffccaa });
+    const head = new THREE.Mesh(headGeo, headMat);
+    head.position.y = 0.4;
+    hikerGroup.add(head);
+    // Body
+    const bodyGeo = new THREE.CylinderGeometry(0.12, 0.15, 0.4, 8);
+    const bodyMat = new THREE.MeshLambertMaterial({ color: 0xcc4422 });
+    const body = new THREE.Mesh(bodyGeo, bodyMat);
+    body.position.y = 0.2;
+    hikerGroup.add(body);
+
+    // Position hiker at 0.9 along curve
+    const hikerPos = curve.getPointAt(0.9);
+    hikerPos.y = surfaceY(hikerPos.x, hikerPos.z);
+    hikerGroup.position.copy(hikerPos);
+    scene.add(hikerGroup);
+
+    // Labels
+    const labelAlert = createLabelSprite("ALERT", "#ff3333");
+    labelAlert.position.copy(hikerPos).add(new THREE.Vector3(0, 1.2, 0));
+    labelAlert.visible = false;
+    scene.add(labelAlert);
+
+    const labelSearch = createLabelSprite("SEARCH", "#ffaa00");
+    labelSearch.visible = false;
+    scene.add(labelSearch);
+
+    const labelLocated = createLabelSprite("LOCATED", "#44ff44");
+    labelLocated.position.copy(hikerPos).add(new THREE.Vector3(0, 1.2, 0));
+    labelLocated.visible = false;
+    scene.add(labelLocated);
+
     let rafId: number;
     const clock = new THREE.Clock();
 
@@ -233,10 +305,15 @@ export default function MountainScene() {
       const time = clock.getElapsedTime();
       const scroll = smoothScroll.get();
 
-      let targetPos = new THREE.Vector3();
-      let targetLook = new THREE.Vector3();
+      // SIMPLIFIED ROUTE ANIMATION
+      // Just camera flying along trail based on scroll
+
+      // 1. Camera Logic
+      const targetPos = new THREE.Vector3();
+      const targetLook = new THREE.Vector3();
 
       if (scroll < 0.1) {
+        // Hero Phase
         const angle = scroll * 0.5;
         targetPos.set(
           CAM_START.x * Math.cos(angle) + CAM_START.z * Math.sin(angle),
@@ -244,32 +321,36 @@ export default function MountainScene() {
           CAM_START.z * Math.cos(angle) - CAM_START.x * Math.sin(angle),
         );
         targetLook.copy(CAM_LOOK_START);
-      } else {
-        // Accelerate the flight progress:
-        // Starts at 0.1 (10% scroll), finishes at 0.85 (85% scroll)
-        // Range is 0.75 instead of previous 0.7, but starting earlier makes it feel more responsive
-        const flightProgress = Math.min(1, Math.max(0, (scroll - 0.1) / 0.75));
-        const pointOnCurve = curve.getPointAt(flightProgress);
 
-        targetPos.copy(pointOnCurve).add(new THREE.Vector3(5, 4, 5));
+        droneGroup.visible = false;
+        trailGeo.setDrawRange(0, 0);
+      } else {
+        // Route Phase
+        // Map remaining scroll (0.1 -> 1.0) to trail progress (0 -> 1)
+        const routeProgress = Math.min(1, Math.max(0, (scroll - 0.1) / 0.9));
+
+        const pointOnCurve = curve.getPointAt(routeProgress);
+
+        // Camera follows
+        targetPos.copy(pointOnCurve).add(new THREE.Vector3(5, 6, 5));
         targetLook.copy(pointOnCurve);
 
-        if (flightProgress > 0.01) {
-          droneGroup.visible = true;
-          droneGroup.position.copy(pointOnCurve);
-          scanCone.rotation.y = time * 2;
-          (scanCone.material as THREE.MeshBasicMaterial).opacity =
-            0.15 + Math.sin(time * 10) * 0.05;
+        // Draw Trail
+        const drawIndex = Math.floor(routeProgress * TRAIL_PTS);
+        trailGeo.setDrawRange(0, drawIndex);
 
-          const drawIndex = Math.floor(flightProgress * TRAIL_PTS);
-          trailGeo.setDrawRange(0, drawIndex);
-        } else {
-          droneGroup.visible = false;
-          trailGeo.setDrawRange(0, 0);
-        }
+        // Visual Marker (Drone as marker)
+        droneGroup.visible = true;
+        droneGroup.position.copy(pointOnCurve);
+
+        // Hide Labels for cleaner look
+        labelAlert.visible = false;
+        labelSearch.visible = false;
+        labelLocated.visible = false;
       }
 
-      camera.position.lerp(targetPos, 0.08);
+      // Smooth Camera
+      camera.position.lerp(targetPos, 0.05);
       camera.up.set(0, 1, 0);
 
       const currentLook = new THREE.Vector3();
@@ -277,23 +358,23 @@ export default function MountainScene() {
       const targetDir = new THREE.Vector3()
         .subVectors(targetLook, camera.position)
         .normalize();
-      const smoothDir = currentLook.lerp(targetDir, 0.08);
+      const smoothDir = currentLook.lerp(targetDir, 0.05);
       camera.lookAt(new THREE.Vector3().copy(camera.position).add(smoothDir));
 
-      const sensorsVisible = scroll > 0.15;
+      // Animation for marker
+      if (droneGroup.visible) {
+        scanCone.rotation.y = time * 2;
+        droneGroup.position.y += Math.sin(time * 3) * 0.05;
+      }
+
+      // Static Hiker
+      hikerGroup.rotation.x = 0;
+      hikerGroup.position.y = hikerPos.y;
+
+      // Pulse Sensors
       sensors.forEach((s) => {
-        const mat = s.mesh.material as THREE.MeshBasicMaterial;
-        if (sensorsVisible) {
-          const active = (Math.sin(time * 3 + s.phase) + 1) / 2;
-          mat.opacity = THREE.MathUtils.lerp(mat.opacity, 0.8 * active, 0.1);
-          s.mesh.position.y = THREE.MathUtils.lerp(
-            s.mesh.position.y,
-            surfaceY(s.mesh.position.x, s.mesh.position.z) + 0.5,
-            0.05,
-          );
-        } else {
-          mat.opacity = THREE.MathUtils.lerp(mat.opacity, 0, 0.1);
-        }
+        const active = (Math.sin(time * 2 + s.phase) + 1) / 2;
+        (s.mesh.material as THREE.MeshBasicMaterial).opacity = active * 0.8;
       });
 
       renderer.render(scene, camera);

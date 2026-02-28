@@ -1,17 +1,35 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import type { Weather } from '@/types/backend';
+
+// Yosemite Valley centre coordinates
+const YOSEMITE_LAT = 37.7459;
+const YOSEMITE_LON = -119.5332;
 
 const sensorStates = [
   'ok','ok','ok','warn','ok','ok','alert','ok',
   'ok','off','ok','ok','warn','ok','ok','ok',
 ];
 
-export default function LeftPanel() {
+function windDirLabel(deg: number): string {
+  const dirs = ['N','NE','E','SE','S','SW','W','NW'];
+  return dirs[Math.round(deg / 45) % 8];
+}
+
+interface LeftPanelProps {
+  open: boolean;
+  onTogglePanel: () => void;
+}
+
+export default function LeftPanel({ open, onTogglePanel }: LeftPanelProps) {
   const chargeBarRef = useRef<HTMLDivElement>(null);
   const chargePctRef = useRef<HTMLDivElement>(null);
   const chargeVal = useRef(30);
 
+  const [weather, setWeather] = useState<Weather | null>(null);
+
+  // Animate charging drone battery
   useEffect(() => {
     const id = setInterval(() => {
       if (chargeVal.current < 100) {
@@ -23,15 +41,55 @@ export default function LeftPanel() {
     return () => clearInterval(id);
   }, []);
 
+  // Fetch live weather from backend
+  useEffect(() => {
+    fetch(`/api/weather?lat=${YOSEMITE_LAT}&lon=${YOSEMITE_LON}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (data?.status === 'ok' && data.weather) setWeather(data.weather);
+      })
+      .catch(() => {/* silently fall back to static values */});
+  }, []);
+
+  // Derive display values — live if available, static fallback otherwise
+  const tempDisplay     = weather ? `${Math.round(weather.temperature_c)}°C`   : '14°C';
+  const tempSub         = weather ? `Feels like ${Math.round(weather.feels_like_c)}°C · ${weather.description}` : 'Dropping to 4°C at 18:00';
+  const windKmh         = weather ? Math.round(weather.wind_speed_ms * 3.6) : 28;
+  const windDir         = weather ? windDirLabel(weather.wind_direction_deg) : 'NW';
+  const windDisplay     = weather ? `${windKmh} km/h`  : '28 km/h';
+  const windSub         = weather ? `${windDir} · ${weather.humidity_pct}% humidity` : 'NW gusts to 42 km/h';
+  const visKm           = weather ? (weather.visibility_m / 1000).toFixed(0) : '14';
+  const visDisplay      = weather ? `${visKm} km`    : '14 km';
+  const visSub          = weather ? `${weather.description}` : 'Clear above 2400m';
+  const precipDisplay   = weather ? `${weather.precipitation_mm_1h.toFixed(1)} mm/h` : '0.0 mm/h';
+  const precipSub       = weather
+    ? (weather.conditions.snow ? 'Snow conditions active' : weather.conditions.heavy_rain ? 'Heavy rain active' : 'No significant precipitation')
+    : 'Snow likely above 3000m';
+  const windWarn        = weather ? windKmh > 30 : true;
+  const precipWarn      = weather ? (weather.conditions.heavy_rain || weather.conditions.snow || weather.conditions.storm) : true;
+
+  // Daylight remaining — computed from current time (Yosemite sunset ≈ 18:10 in late Feb)
+  const now = new Date();
+  const sunsetHour = 18, sunsetMin = 10;
+  const sunsetTotalMin = sunsetHour * 60 + sunsetMin;
+  const nowTotalMin = now.getHours() * 60 + now.getMinutes();
+  const remainMin = Math.max(0, sunsetTotalMin - nowTotalMin);
+  const daylightDisplay = remainMin > 0
+    ? `${Math.floor(remainMin / 60)}h ${remainMin % 60}m`
+    : 'After sunset';
+
   return (
-    <div className="panel">
+    <aside className={`panel-drawer panel-drawer--left${open ? ' open' : ''}`}>
+      <div className="panel-close-btn" onClick={onTogglePanel}>
+        <span>FLEET ✕</span>
+      </div>
+
       {/* Drone Fleet */}
       <div className="panel-section">
         <div className="panel-heading">
           <span className="panel-title">Drone Fleet</span>
           <span className="panel-badge">3/4 Ops</span>
         </div>
-
         <div className="drone-card">
           <div className="drone-header">
             <span className="drone-id">UAV-ALPHA-01</span>
@@ -161,19 +219,20 @@ export default function LeftPanel() {
         </div>
       </div>
 
-      {/* Weather */}
+      {/* Environmental Conditions — live from backend weather API */}
       <div className="panel-section">
         <div className="panel-heading">
           <span className="panel-title">Environmental Conditions</span>
+          {weather && <span className="panel-badge" style={{ color: 'var(--db-green)' }}>● LIVE</span>}
         </div>
         <div className="weather-grid">
           {([
-            ['Temperature',       '14°C',    'Dropping to 4°C at 18:00',  false],
-            ['Wind Speed',        '28 km/h', 'NW gusts to 42 km/h',       true],
-            ['Visibility',        '14 km',   'Clear above 2400m',         false],
-            ['Precip Forecast',   '62%',     'Snow likely above 3000m',   true],
-            ['Daylight Remaining','3h 12m',  'Sunset 18:12 local',        false],
-            ['Trail Condition',   'Moderate','Wet rock above 2800m',      true],
+            ['Temperature',        tempDisplay,     tempSub,          false],
+            ['Wind Speed',         windDisplay,     windSub,          windWarn],
+            ['Visibility',         visDisplay,      visSub,           false],
+            ['Precipitation',      precipDisplay,   precipSub,        precipWarn],
+            ['Daylight Remaining', daylightDisplay, 'Sunset ~18:10 local', false],
+            ['Trail Condition',    'Moderate',      'Wet rock above 2800m', true],
           ] as [string, string, string, boolean][]).map(([label, value, sub, warn]) => (
             <div key={label} className="weather-cell">
               <div className="w-label">{label}</div>
@@ -183,6 +242,6 @@ export default function LeftPanel() {
           ))}
         </div>
       </div>
-    </div>
+    </aside>
   );
 }

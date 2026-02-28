@@ -10,11 +10,10 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'missing params' }, { status: 400 });
   }
 
-  const res = await fetch(`https://tile.openstreetmap.org/${z}/${x}/${y}.png`, {
-    headers: {
-      'User-Agent': 'trAIl/1.0 (trail-guardian safety-research)',
-      'Referer': 'https://www.openstreetmap.org',
-    },
+  // Proxy kept for potential future use, but OSM layer now fetches tiles directly from browser
+  const tileUrl = `https://a.basemaps.cartocdn.com/light_all/${z}/${x}/${y}.png`;
+  const res = await fetch(tileUrl, {
+    headers: { 'User-Agent': 'trAIl/1.0 trail-guardian-safety-app' },
   });
 
   if (!res.ok) {

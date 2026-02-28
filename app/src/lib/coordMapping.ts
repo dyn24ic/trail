@@ -7,13 +7,14 @@ export function latLonToMesh(
   lat: number,
   lon: number,
   bbox: BBox,
-  meshSize = 20,
+  meshWidth = 20,
+  meshHeight = 20,
 ): { x: number; z: number } {
-  const normLon = (lon - bbox.west) / (bbox.east - bbox.west);
+  const normLon = (lon - bbox.west)  / (bbox.east  - bbox.west);
   const normLat = (lat - bbox.south) / (bbox.north - bbox.south);
   return {
-    x: (normLon - 0.5) * meshSize,
-    z: -(normLat - 0.5) * meshSize,
+    x:  (normLon - 0.5) * meshWidth,
+    z: -(normLat - 0.5) * meshHeight,
   };
 }
 
@@ -52,11 +53,11 @@ export function heightAtMeshPos(
   z: number,
   heights: Float32Array,
   res: number,
-  meshSize = 20,
+  meshWidth = 20,
+  meshHeight = 20,
 ): number {
-  // Map x,z from [-meshSize/2, meshSize/2] to [0, res-1]
-  const u = (x / meshSize + 0.5) * (res - 1);
-  const v = (z / meshSize + 0.5) * (res - 1); // v=0 → south (Three.js row 0)
+  const u = (x / meshWidth  + 0.5) * (res - 1);
+  const v = (z / meshHeight + 0.5) * (res - 1);
 
   const col = Math.max(0, Math.min(res - 2, Math.floor(u)));
   const row = Math.max(0, Math.min(res - 2, Math.floor(v)));
