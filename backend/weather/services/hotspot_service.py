@@ -2,12 +2,11 @@
 Hotspot prediction service — main orchestrator.
 
 Fuses NPS ArcGIS data, Open-Meteo HRRR weather, and terrain/DEM data, then
-calls GPT to produce ranked accident hotspot zones for the next 24 hours.
+calls the active hotspot model to produce ranked accident hotspot zones.
 
-Model:
-    Currently: gpt-4o
-    TODO: Upgrade to gpt-5.2 when available via the OpenAI API.
-    Long-term: Replace with NVIDIA Nemotron after fine-tuning on Yosemite SAR incident data.
+Active model is controlled by ACTIVE_MODEL in hotspot_models.py.
+  - RandomHotspotModel (default): instant, no network calls, for dev/demo
+  - Future: swap in a real inference model by changing that one line
 
 Public API:
     predict_hotspots(bbox: dict) -> dict   (HotspotPredictionResponse)
@@ -33,17 +32,17 @@ from .elevation_service import (
     score_candidates,
     seed_candidate_points,
 )
+from .hotspot_models import ACTIVE_MODEL, HotspotContext
 from .openmeteo_service import get_weather, weather_summary_string
 
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# AI model configuration
+# GPT model configuration (used by the legacy GPT pipeline helpers below)
 # ---------------------------------------------------------------------------
 # TODO: Update to "gpt-5.2" once that model is available in the OpenAI API.
 # Long-term plan: swap endpoint to NVIDIA Nemotron after fine-tuning on YOSE SAR data.
 AI_MODEL = "gpt-4o"
-MODEL_VERSION = f"trAIl-weather-v1.0+{AI_MODEL}"
 
 # Number of candidate points to evaluate across the bbox (grid_size² total)
 CANDIDATE_GRID_SIZE = 8
@@ -80,7 +79,11 @@ Risk level thresholds:
 
 def predict_hotspots(bbox: dict) -> dict:
     """
-    Run the full hotspot prediction pipeline for a bounding box.
+    Run hotspot prediction for a bounding box using the active model.
+
+    When ACTIVE_MODEL.needs_context is False (e.g. RandomHotspotModel), all
+    expensive external fetches are skipped entirely.  When True, the full
+    ArcGIS + weather + terrain pipeline runs and results are passed as context.
 
     Args:
         bbox: { "south": float, "north": float, "west": float, "east": float }
@@ -88,48 +91,46 @@ def predict_hotspots(bbox: dict) -> dict:
     Returns:
         HotspotPredictionResponse dict (see WEATHER.md § Output Format)
     """
-    logger.info("Starting hotspot prediction for bbox: %s", bbox)
-
-    # ── Phase 1: Parallel data fetch ──────────────────────────────────────
-    raw = _fetch_all_data(bbox)
-
-    # ── Phase 2: Terrain data (sequential — DEM fetch is already cached) ──
-    logger.info("Fetching terrain data...")
-    terrain = get_terrain_for_bbox(bbox)
-    if terrain is None:
-        logger.warning("Terrain data unavailable — terrain scores will default to 0.5")
-
-    # ── Phase 3: Candidate grid + numeric scoring ──────────────────────────
-    logger.info("Seeding and scoring %d candidate points...", CANDIDATE_GRID_SIZE ** 2)
-    candidates = seed_candidate_points(bbox, CANDIDATE_GRID_SIZE)
-    scored = score_candidates(
-        candidates,
-        terrain_data=terrain,
-        fire=raw["fire"],
-        weather=raw["weather"],
-        hydro=raw["hydro"],
-        road_incidents=raw["roads"],
+    logger.info(
+        "Starting hotspot prediction for bbox: %s (model: %s)",
+        bbox, ACTIVE_MODEL.version,
     )
-    top_candidates = scored[:TOP_CANDIDATES_FOR_GPT]
 
-    # ── Phase 4: GPT prediction ────────────────────────────────────────────
-    logger.info("Calling %s for hotspot analysis...", AI_MODEL)
-    hotspots = _run_gpt_prediction(bbox, raw, top_candidates)
+    if ACTIVE_MODEL.needs_context:
+        # ── Full pipeline: fetch all env data then pass to model ──────────
+        raw     = _fetch_all_data(bbox)
+        logger.info("Fetching terrain data...")
+        terrain = get_terrain_for_bbox(bbox)
+        if terrain is None:
+            logger.warning("Terrain data unavailable — terrain scores will default to 0.5")
+        context = HotspotContext(
+            fire=raw["fire"],
+            weather=raw["weather"],
+            hydro=raw["hydro"],
+            roads=raw["roads"],
+            smoke_aqi=raw["smoke_aqi"],
+            terrain=terrain,
+        )
+    else:
+        # ── Fast path: skip all network calls ─────────────────────────────
+        raw     = {}
+        context = None
 
-    # ── Phase 5: Assemble response ─────────────────────────────────────────
-    weather = raw["weather"] or {}
-    fire = raw["fire"] or {}
+    hotspots = ACTIVE_MODEL.predict(bbox, context)
+
+    weather = raw.get("weather") or {}
+    fire    = raw.get("fire")    or {}
 
     return {
-        "hotspots": hotspots,
-        "bbox": bbox,
-        "generatedAt": datetime.now(tz=timezone.utc).isoformat(),
-        "modelVersion": MODEL_VERSION,
+        "hotspots":     hotspots,
+        "bbox":         bbox,
+        "generatedAt":  datetime.now(tz=timezone.utc).isoformat(),
+        "modelVersion": ACTIVE_MODEL.version,
         "conditions": {
             "fireDangerRating": fire.get("danger_rating", "UNKNOWN"),
-            "weatherSummary": weather_summary_string(weather) if weather else "unavailable",
-            "activeFires": 0,           # no active fire polygon layer in current spec
-            "smokeAqi": raw["smoke_aqi"],
+            "weatherSummary":   weather_summary_string(weather) if weather else "unavailable",
+            "activeFires":      0,
+            "smokeAqi":         raw.get("smoke_aqi"),
         },
     }
 
