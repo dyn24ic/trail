@@ -1,0 +1,72 @@
+# trAIl Nemotron-70B Fine-Tuning Configuration
+# Launch: torchrun --nproc_per_node=2 finetune.py --config config.yaml
+
+model:
+  name: nvidia/Llama-3.1-Nemotron-70B-Instruct-HF
+  # QLoRA: loads in 4-bit → ~35 GB VRAM per GPU → fits on 2x A100 80GB
+  load_in_4bit: true
+  bnb_4bit_compute_dtype: bfloat16
+  bnb_4bit_quant_type: nf4
+  use_nested_quant: true   # double quantisation — saves ~0.4 GB/GPU
+
+lora:
+  rank: 16
+  alpha: 32
+  dropout: 0.05
+  # Target the attention projections — sufficient for domain adaptation
+  target_modules:
+    - q_proj
+    - k_proj
+    - v_proj
+    - o_proj
+  # Optionally also tune feed-forward layers (higher quality, more VRAM):
+  # - gate_proj
+  # - up_proj
+  # - down_proj
+  bias: none
+  task_type: CAUSAL_LM
+
+training:
+  epochs: 3
+  per_device_batch_size: 1
+  gradient_accumulation_steps: 8   # effective batch = 1 * 8 * 2 GPUs = 16
+  learning_rate: 2.0e-4
+  lr_scheduler_type: cosine
+  warmup_ratio: 0.05
+  weight_decay: 0.01
+  max_grad_norm: 1.0
+  max_seq_len: 4096
+  fp16: false
+  bf16: true          # A100 supports bfloat16
+  gradient_checkpointing: true
+  optim: paged_adamw_8bit
+
+data:
+  train_file: ../01_data/output/training.jsonl
+  val_file:   ../01_data/output/validation.jsonl
+  # Chat template: use model's built-in Llama-3 template
+  # SFTTrainer will handle packing/padding automatically
+
+output:
+  dir: ./checkpoints
+  save_strategy: steps
+  save_steps: 100
+  save_total_limit: 3    # keep only last 3 checkpoints
+  eval_strategy: steps
+  eval_steps: 100
+  logging_steps: 10
+  load_best_model_at_end: true
+  metric_for_best_model: eval_loss
+
+# Weights & Biases (optional — set WANDB_API_KEY env var to enable)
+wandb:
+  project: trail-nemotron-hotspot
+  run_name: nemotron-70b-yose-v1
+
+# Brev-specific notes:
+# 1. Instance: 2x NVIDIA A100 80GB (select "A100 x2" in Brev instance type)
+# 2. Upload this entire training/ directory to your Brev instance
+# 3. Install: pip install -r requirements.txt
+# 4. Login HuggingFace: huggingface-cli login  (need nvidia/Llama-3.1-Nemotron access)
+# 5. Launch: torchrun --nproc_per_node=2 02_finetune/finetune.py --config 02_finetune/config.yaml
+# 6. Checkpoint adapter saved to ./checkpoints/final_adapter/

@@ -1,0 +1,242 @@
+{
+  "source": "R&S Injury Law – Deaths in Yosemite National Park (2023-05-02, updated 2025-07-31)",
+  "url": "https://randsinjurylaw.com/deaths-in-yosemite-national-park/",
+  "notes": "~900 documented deaths studied 1857–2023. Percentages represent share of total deaths by cause.",
+  "overall_distribution": {
+    "fall":         {"percent": 38, "description": "Falls from cliffs, waterfalls, and steep terrain"},
+    "vehicle":      {"percent": 18, "description": "Motor vehicle accidents on park roads and parking areas"},
+    "drowning":     {"percent": 13, "description": "Drowning in rivers, waterfalls, and pools"},
+    "medical":      {"percent": 10, "description": "Heart attacks, illness, and other medical emergencies"},
+    "rockfall":     {"percent":  7, "description": "Rockfall and landslides striking hikers or campers"},
+    "search_rescue":{"percent":  7, "description": "Exposure, hypothermia, and overdue hiker recoveries"},
+    "lightning":    {"percent":  4, "description": "Lightning strikes on exposed terrain and summits"},
+    "fire_related": {"percent":  3, "description": "Wildfire, smoke inhalation, and burn injuries"}
+  },
+  "high_risk_locations": [
+    {
+      "name": "Half Dome Cables",
+      "lat": 37.7456, "lon": -119.5330,
+      "primary_type": "fall",
+      "secondary_types": ["lightning", "medical"],
+      "risk_factors": [
+        "80-degree granite cable climb",
+        "severe lightning exposure on summit dome",
+        "extreme crowding during permit season",
+        "altitude 2693 m — hypoxia risk"
+      ],
+      "deaths_approx": 60,
+      "peak_months": [6, 7, 8, 9],
+      "notes": "Most deaths occur on the cables or the sub-dome approach. Lightning fatalities spike July–August afternoon storms."
+    },
+    {
+      "name": "Mist Trail – Vernal Falls Footbridge Area",
+      "lat": 37.7320, "lon": -119.5455,
+      "primary_type": "fall",
+      "secondary_types": ["drowning"],
+      "risk_factors": [
+        "Spray-polished granite steps become glass-slick",
+        "Hikers cross barriers to stand near the lip",
+        "Spring snowmelt creates fast, deep approach channels",
+        "Guardrail gaps near Emerald Pool"
+      ],
+      "deaths_approx": 30,
+      "peak_months": [5, 6, 7],
+      "notes": "Several deaths from slipping on wet rock and being carried over the 97 m falls."
+    },
+    {
+      "name": "Nevada Falls – Approach and Lip",
+      "lat": 37.7274, "lon": -119.5308,
+      "primary_type": "drowning",
+      "secondary_types": ["fall"],
+      "risk_factors": [
+        "Strong current above falls deceives swimmers",
+        "Polished granite provides no grip if swept",
+        "173 m drop — unsurvivable",
+        "Warning signs frequently ignored"
+      ],
+      "deaths_approx": 20,
+      "peak_months": [5, 6, 7],
+      "notes": "Multiple drowning deaths from swimmers ignoring closure signs and entering the river above the falls."
+    },
+    {
+      "name": "El Capitan Base and Rockfall Zone",
+      "lat": 37.7340, "lon": -119.6375,
+      "primary_type": "rockfall",
+      "secondary_types": ["fall"],
+      "risk_factors": [
+        "3000-foot granite face sheds exfoliation slabs seasonally",
+        "Climbers exposed during multi-day ascents",
+        "Valley floor spectators struck by debris",
+        "September 2017: 100-tonne slab release killed 1"
+      ],
+      "deaths_approx": 25,
+      "peak_months": [3, 4, 5, 9, 10],
+      "notes": "Rockfall risk year-round but highest in spring (freeze-thaw) and autumn. El Cap Meadow is a documented impact zone."
+    },
+    {
+      "name": "Merced River – Valley Floor Crossings",
+      "lat": 37.7449, "lon": -119.5450,
+      "primary_type": "drowning",
+      "secondary_types": [],
+      "risk_factors": [
+        "Cold snowmelt water causes rapid incapacitation",
+        "Deceptively calm surface over fast sub-surface currents",
+        "Underwater rocks and log debris",
+        "Non-swimmers and children entering without PFDs"
+      ],
+      "deaths_approx": 40,
+      "peak_months": [5, 6, 7],
+      "notes": "Most drownings occur at popular swimming holes like Sentinel Beach and Cathedral Beach during peak flow."
+    },
+    {
+      "name": "Yosemite Valley Loop Road",
+      "lat": 37.7449, "lon": -119.5864,
+      "primary_type": "vehicle",
+      "secondary_types": [],
+      "risk_factors": [
+        "High tourist traffic volume – millions of cars per year",
+        "Cyclists and pedestrians share narrow roadway",
+        "Wildlife (bears, deer) cross unpredictably",
+        "Night driving with limited lighting"
+      ],
+      "deaths_approx": 40,
+      "peak_months": [6, 7, 8],
+      "notes": "Vehicle fatalities distributed across the valley one-way loop, including tunnel and Southside Drive."
+    },
+    {
+      "name": "Tioga Road / CA-120 (High Country)",
+      "lat": 37.8200, "lon": -119.5000,
+      "primary_type": "vehicle",
+      "secondary_types": ["medical"],
+      "risk_factors": [
+        "High speed limit on mountain curves",
+        "Ice and snow during shoulder seasons",
+        "Sudden weather whiteouts above 3000 m",
+        "Deer and bear crossings dawn/dusk"
+      ],
+      "deaths_approx": 35,
+      "peak_months": [5, 6, 9, 10],
+      "notes": "Road open approximately May–November. Most crashes occur on curves between Crane Flat and Tioga Pass."
+    },
+    {
+      "name": "Yosemite Falls Trail – Upper Section",
+      "lat": 37.7530, "lon": -119.5955,
+      "primary_type": "fall",
+      "secondary_types": ["medical", "search_rescue"],
+      "risk_factors": [
+        "Exposed rocky ridgeline with sheer drops to valley",
+        "Switchback trail deteriorates in wet conditions",
+        "Off-trail scrambling near the falls lip",
+        "Rescue helicopter access difficult in this drainage"
+      ],
+      "deaths_approx": 15,
+      "peak_months": [4, 5, 6, 7],
+      "notes": "Multiple deaths from falls near the upper falls viewing area. One notable 1999 case involved off-trail exploration."
+    },
+    {
+      "name": "Clouds Rest Ridge",
+      "lat": 37.7609, "lon": -119.4887,
+      "primary_type": "lightning",
+      "secondary_types": ["fall", "search_rescue"],
+      "risk_factors": [
+        "Highest exposed ridgeline in Yosemite (2985 m)",
+        "Afternoon convective storms July–August",
+        "No shelter within 1 km of summit",
+        "Steep 1000 m drop on north face"
+      ],
+      "deaths_approx": 10,
+      "peak_months": [7, 8],
+      "notes": "Multiple lightning fatalities during afternoon storms. Park service issues regular storm advisories for this ridge."
+    },
+    {
+      "name": "Tuolumne Meadows – High Country Trailheads",
+      "lat": 37.8769, "lon": -119.3591,
+      "primary_type": "search_rescue",
+      "secondary_types": ["medical", "lightning"],
+      "risk_factors": [
+        "2621 m altitude – altitude sickness for unprepared hikers",
+        "Late and early season snow cover obscures trails",
+        "Remote drainages with multi-day rescue lead times",
+        "Temperature drops below 0°C even in July nights"
+      ],
+      "deaths_approx": 20,
+      "peak_months": [7, 8, 9],
+      "notes": "Most deaths involve lost or overdue hikers in the backcountry who succumb to exposure. John Muir Trail junctions."
+    },
+    {
+      "name": "Glacier Point Road – Overlooks",
+      "lat": 37.7305, "lon": -119.5736,
+      "primary_type": "vehicle",
+      "secondary_types": ["fall"],
+      "risk_factors": [
+        "Narrow two-lane road with switchbacks to 2200 m",
+        "Pullout areas immediately adjacent to cliff edges",
+        "Ice in spring and autumn",
+        "Tourist photo stops near unguarded edges"
+      ],
+      "deaths_approx": 15,
+      "peak_months": [4, 5, 9, 10],
+      "notes": "Deaths from both vehicle accidents and falls from overlook viewpoints."
+    },
+    {
+      "name": "Cathedral Lakes – Subalpine Zone",
+      "lat": 37.8406, "lon": -119.4002,
+      "primary_type": "lightning",
+      "secondary_types": ["medical", "search_rescue"],
+      "risk_factors": [
+        "Open subalpine terrain with no lightning shelter",
+        "Popular day-hike destination during storm season",
+        "2900 m elevation, exposed granite slabs",
+        "Afternoon storm onset within 20 min typical"
+      ],
+      "deaths_approx": 8,
+      "peak_months": [7, 8],
+      "notes": "Several lightning deaths on the granite slabs en route to and at the lakes."
+    },
+    {
+      "name": "Bridalveil Fall – Base Pool",
+      "lat": 37.7162, "lon": -119.6487,
+      "primary_type": "fall",
+      "secondary_types": ["drowning"],
+      "risk_factors": [
+        "Slippery rocks surrounding plunge pool",
+        "Strong wind gusts (100+ km/h recorded) below the falls",
+        "Overcrowding on limited viewing platform",
+        "Pool depth unpredictable in spring"
+      ],
+      "deaths_approx": 5,
+      "peak_months": [4, 5, 6],
+      "notes": "Visitors attempting to approach the base slip on wet granite. Wind can push people off balance."
+    },
+    {
+      "name": "Hetch Hetchy Reservoir",
+      "lat": 37.9482, "lon": -119.7792,
+      "primary_type": "drowning",
+      "secondary_types": ["fall"],
+      "risk_factors": [
+        "Cold deep reservoir with steep canyon walls",
+        "Limited rescue access – no road to water's edge",
+        "Remote – response times exceed 45 min",
+        "Swimming prohibited but violations common"
+      ],
+      "deaths_approx": 8,
+      "peak_months": [6, 7, 8],
+      "notes": "Drowning deaths from illegal swimming. Canyon walls prevent self-rescue."
+    },
+    {
+      "name": "Mirror Lake / Tenaya Creek",
+      "lat": 37.7450, "lon": -119.5100,
+      "primary_type": "drowning",
+      "secondary_types": ["fall", "search_rescue"],
+      "risk_factors": [
+        "Creek floods dramatically in spring snowmelt",
+        "Flat trail lures hikers close to fast water",
+        "Children frequently near water unsupervised",
+        "Footbridge washed out periodically"
+      ],
+      "deaths_approx": 7,
+      "peak_months": [4, 5, 6],
+      "notes": "Spring flood events have swept hikers off the trail. Seasonal closure signs often ignored."
+    }
+  ]
+}
