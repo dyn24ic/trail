@@ -56,6 +56,7 @@ interface Props {
   routeRanger?: RouteCompareResponse | null;
   onControlsReady?: (ctrl: CameraControls) => void;
   onSatStatus?: (status: "loading" | "loaded" | "error") => void;
+  onCenterUpdate?: (lat: number, lon: number, elevM: number) => void;
 }
 
 // ── Satellite image loading ───────────────────────────────────────────────────
@@ -202,6 +203,7 @@ export default function TerrainScene({
   routeRanger,
   onControlsReady,
   onSatStatus,
+  onCenterUpdate,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const elevData = useTerrainGrid(YOSEMITE_BBOX, MESH_RES);
@@ -217,6 +219,11 @@ export default function TerrainScene({
   const routeAlphaRef = useRef<RouteCompareResponse | null>(null);
   const routeRangerRef = useRef<RouteCompareResponse | null>(null);
   const viewModeChangedRef = useRef(false);
+  const onCenterUpdateRef = useRef(onCenterUpdate);
+
+  useEffect(() => {
+    onCenterUpdateRef.current = onCenterUpdate;
+  }, [onCenterUpdate]);
 
   useEffect(() => {
     elevRef.current = elevData;
@@ -267,8 +274,8 @@ export default function TerrainScene({
     const sceneFog = new THREE.FogExp2(0x040b0b, 0.018);
     scene.fog = sceneFog;
 
-    const camera = new THREE.PerspectiveCamera(50, 2, 0.1, 300);
-    camera.position.set(0, 22, 28);
+    const camera = new THREE.PerspectiveCamera(50, 2, 0.01, 300);
+    camera.position.set(0, 38, 0.001);
 
     // Orthographic camera used exclusively in 2D mode
     const orthoCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 400);
@@ -281,16 +288,13 @@ export default function TerrainScene({
     controls.autoRotate = false;
     controls.enableDamping = true;
     controls.dampingFactor = 0.07;
-    controls.minDistance = 0.3;
+    controls.minDistance = 4.0;
     controls.maxDistance = 80;
     controls.maxPolarAngle = Math.PI / 2 - 0.01;
     controls.zoomSpeed = 1.4;
+    camera.position.set(0, 38, 0.001);
+    controls.target.set(0, 1.5, 0);
     controls.update();
-    {
-      const pitch = (90 - controls.getPolarAngle() * 180 / Math.PI).toFixed(1);
-      const yaw   = (controls.getAzimuthalAngle() * 180 / Math.PI).toFixed(1);
-      console.log(`[trAIl] INIT 3D load | pitch: ${pitch}° | yaw: ${yaw}°`);
-    }
 
     // Expose camera control functions to the parent
     onControlsReady?.({
@@ -307,7 +311,7 @@ export default function TerrainScene({
         controls.update();
       },
       reset: () => {
-        camera.position.set(0, 22, 28);
+        camera.position.set(0, 38, 0.001);
         controls.target.set(0, 1.5, 0);
         controls.update();
       },
@@ -1448,6 +1452,10 @@ export default function TerrainScene({
     canvas.addEventListener("mouseup", onMouseUp);
     canvas.addEventListener("click", onClick);
 
+    // ── Centre-update throttle state ─────────────────────────────────
+    const lastCenterTgt = new THREE.Vector3(Infinity, 0, Infinity);
+    let lastCenterTs = 0;
+
     // ── Render loop ───────────────────────────────────────────────────
     let startT: number | null = null;
     let prevElevSource: string | null = null;
@@ -1466,11 +1474,6 @@ export default function TerrainScene({
         if (is2D) {
           applyFlatTerrain();
           repositionSurface();
-          {
-            const pitch = (90 - controls.getPolarAngle() * 180 / Math.PI).toFixed(1);
-            const yaw   = (controls.getAzimuthalAngle() * 180 / Math.PI).toFixed(1);
-            console.log(`[trAIl] SWITCH → 2D | pitch: ${pitch}° | yaw: ${yaw}°`);
-          }
           focusTween = {
             fromPos: camera.position.clone(),
             fromTarget: controls.target.clone(),
@@ -1482,11 +1485,6 @@ export default function TerrainScene({
           applyElevatedTerrain();
           rebuildSkirt();
           repositionSurface();
-          {
-            const pitch = (90 - controls.getPolarAngle() * 180 / Math.PI).toFixed(1);
-            const yaw   = (controls.getAzimuthalAngle() * 180 / Math.PI).toFixed(1);
-            console.log(`[trAIl] SWITCH → 3D | pitch: ${pitch}° | yaw: ${yaw}°`);
-          }
           // Flush accumulated OrbitControls damping state (sphericalDelta, panOffset)
           // so damping residue from 2D mode doesn't drift the camera back overhead.
           const fromPos3D = camera.position.clone();
@@ -1497,7 +1495,7 @@ export default function TerrainScene({
           focusTween = {
             fromPos: fromPos3D,
             fromTarget: fromTarget3D,
-            toPos: new THREE.Vector3(0, 22, 28),
+            toPos: new THREE.Vector3(0, 38, 0.001),
             toTarget: new THREE.Vector3(0, 1.5, 0),
             t: 0,
           };
@@ -1593,7 +1591,7 @@ export default function TerrainScene({
       // Scale all surface markers proportionally to camera distance
       const dist = camera.position.distanceTo(controls.target);
       landmarkGroups.forEach(({ group, key }) => {
-        group.visible = L.landmarks && (key || dist < 12);
+        group.visible = L.landmarks && dist > 6 && (key || dist < 12);
       });
 
       const markerScale = is2D
@@ -1662,6 +1660,26 @@ export default function TerrainScene({
       }
 
       controls.update();
+
+      // ── Emit centre-of-view coords (throttled) ────────────────────
+      if (onCenterUpdateRef.current) {
+        const tgt = controls.target;
+        const dx = tgt.x - lastCenterTgt.x, dz = tgt.z - lastCenterTgt.z;
+        if ((dx * dx + dz * dz > 0.0001) && ts - lastCenterTs > 150) {
+          lastCenterTgt.set(tgt.x, 0, tgt.z);
+          lastCenterTs = ts;
+          const normLon = tgt.x / SZ_W + 0.5;
+          const normLat = -(tgt.z / SZ_H) + 0.5;
+          const lat = normLat * (YOSEMITE_BBOX.north - YOSEMITE_BBOX.south) + YOSEMITE_BBOX.south;
+          const lon = normLon * (YOSEMITE_BBOX.east  - YOSEMITE_BBOX.west)  + YOSEMITE_BBOX.west;
+          const meshH = heightsArray ? heightAtMeshPos(tgt.x, tgt.z, heightsArray, RES, SZ_W, SZ_H) : 0;
+          const ed = elevRef.current;
+          const elevM = ed
+            ? Math.round((meshH / 4.5) * (ed.maxElev - ed.minElev) + ed.minElev)
+            : Math.round(meshH * 200 + 600);
+          onCenterUpdateRef.current(lat, lon, elevM);
+        }
+      }
 
       // Focus tween
       if (focusTween) {

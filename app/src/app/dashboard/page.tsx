@@ -16,7 +16,7 @@ export default function DashboardPage() {
     <div className="dashboard-body">
       <TopBar />
       <div className="main-area">
-        <MapContainer />
+        <MapContainer leftOpen={layout.leftOpen} rightOpen={layout.rightOpen} />
         {!layout.leftOpen  && <div className="panel-tab panel-tab--left"  onClick={() => togglePanel('left')}>FLEET</div>}
         {!layout.rightOpen && <div className="panel-tab panel-tab--right" onClick={() => togglePanel('right')}>OPS</div>}
         <LeftPanel  open={layout.leftOpen}  onTogglePanel={() => togglePanel('left')} />
