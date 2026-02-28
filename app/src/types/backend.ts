@@ -169,3 +169,71 @@ export interface BackendHealthResponse {
   openai_configured: boolean;
   openweather_configured: boolean;
 }
+
+// ── Scala incident types ──────────────────────────────────────────────────────
+
+export type IncidentStatus =
+  | 'Triggered'
+  | 'Searching'
+  | 'VictimFound'
+  | 'Triaged'
+  | 'Routed'
+  | 'Closed';
+
+export interface ScalaSearchZone {
+  lat: number;
+  lng: number;
+  radiusMeters: number;
+  confidence: number;
+}
+
+export interface ScalaDroneResult {
+  victimFound: boolean;
+  victimLat: number | null;
+  victimLng: number | null;
+  confidence: number;
+  imageUrl: string | null;
+  scanDurationSeconds: number;
+}
+
+export interface ScalaInjuryTriage {
+  severity: 'Minor' | 'Moderate' | 'Severe';
+  injuryType: string;
+  consciousAndResponsive: boolean;
+  recommendedResponse: string;
+  estimatedMedicalUrgencyMinutes: number;
+}
+
+export interface ScalaRouteStep {
+  stepNumber: number;
+  description: string;
+  distanceMeters: number;
+  estimatedMinutes: number;
+  hazards: string[];
+}
+
+export interface ScalaResponderRoute {
+  steps: ScalaRouteStep[];
+  totalDistanceMeters: number;
+  totalEtaMinutes: number;
+  accessType: string;
+  notes: string;
+}
+
+export interface IncidentSummary {
+  id: string;
+  triggerType: string;
+  status: IncidentStatus;
+  locationLat: number | null;
+  locationLng: number | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Incident extends IncidentSummary {
+  triggerPayload: string;
+  searchZones: ScalaSearchZone[] | null;
+  droneResult: ScalaDroneResult | null;
+  triage: ScalaInjuryTriage | null;
+  route: ScalaResponderRoute | null;
+}

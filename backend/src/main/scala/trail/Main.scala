@@ -12,7 +12,7 @@ import trail.services.*
 
 object Main extends IOApp:
 
-  val DbPath = "trail.db"
+  val DbPath = sys.env.getOrElse("DB_PATH", "trail.db")
 
   def run(args: List[String]): IO[ExitCode] =
     Database.transactor(DbPath).use { xa =>

@@ -26,6 +26,7 @@ import type {
   HotspotPredictionResponse,
   PlacementSuggestions,
 } from "@/types/hotspots";
+import type { IncidentMarker } from "@/types/markers";
 
 export interface CameraControls {
   zoomIn: () => void;
@@ -50,6 +51,7 @@ interface Props {
   dangerZones?: DangerZone[];
   hotspotData?: HotspotPredictionResponse | null;
   placementData?: PlacementSuggestions | null;
+  incidentMarkers?: IncidentMarker[];
   routeAlpha?: RouteCompareResponse | null;
   routeRanger?: RouteCompareResponse | null;
   onControlsReady?: (ctrl: CameraControls) => void;
@@ -196,6 +198,7 @@ export default function TerrainScene({
   dangerZones,
   hotspotData,
   placementData,
+  incidentMarkers,
   routeAlpha,
   routeRanger,
   onControlsReady,
@@ -212,6 +215,7 @@ export default function TerrainScene({
   const dangerZonesRef = useRef<DangerZone[]>([]);
   const hotspotRef = useRef<HotspotPredictionResponse | null>(null);
   const placementRef = useRef<PlacementSuggestions | null>(null);
+  const incidentMarkersRef = useRef<IncidentMarker[]>(incidentMarkers ?? incidentData);
   const routeAlphaRef = useRef<RouteCompareResponse | null>(null);
   const routeRangerRef = useRef<RouteCompareResponse | null>(null);
   const viewModeChangedRef = useRef(false);
@@ -246,6 +250,9 @@ export default function TerrainScene({
   useEffect(() => {
     placementRef.current = placementData ?? null;
   }, [placementData]);
+  useEffect(() => {
+    incidentMarkersRef.current = incidentMarkers ?? incidentData;
+  }, [incidentMarkers]);
   useEffect(() => {
     routeAlphaRef.current = routeAlpha ?? null;
   }, [routeAlpha]);
@@ -686,7 +693,7 @@ export default function TerrainScene({
       phase: number;
     }[] = [];
 
-    incidentData.forEach((inc) => {
+    incidentMarkersRef.current.forEach((inc) => {
       const { x, z } = latLonToMesh(
         inc.lat,
         inc.lon,
@@ -761,7 +768,7 @@ export default function TerrainScene({
       zoneGroups.push(g);
     }
 
-    incidentData.forEach((inc, i) => {
+    incidentMarkersRef.current.forEach((inc, i) => {
       const { x, z } = latLonToMesh(
         inc.lat,
         inc.lon,

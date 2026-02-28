@@ -12,7 +12,7 @@ export default function RightPanel({ open, onTogglePanel }: RightPanelProps) {
         <span>✕ OPS</span>
       </div>
 
-      {/* Active Incidents */}
+      {/* ── Active Incidents ──────────────────────────────────────── */}
       <div className="panel-section">
         <div className="panel-heading">
           <span className="panel-title">Active Incidents</span>

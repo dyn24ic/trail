@@ -10,6 +10,9 @@ load_dotenv(dotenv_path=os.path.join(BASE_DIR, ".env.local"))
 SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', 'dev-insecure-key')
 DEBUG = os.getenv('DEBUG', 'True') == 'True'
 ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
+for host in ('django', 'django-1', 'nextjs', 'nextjs-1'):
+    if host not in ALLOWED_HOSTS:
+        ALLOWED_HOSTS.append(host)
 
 # DEBUG: Print OpenWeatherMap API key status at startup
 INSTALLED_APPS = [
@@ -55,10 +58,16 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'trail_backend.wsgi.application'
 
+_db_path = os.getenv('DB_PATH', str(BASE_DIR / 'db.sqlite3'))
+
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'NAME': _db_path,
+        'OPTIONS': {
+            # WAL mode allows concurrent reads + one writer without blocking
+            'init_command': 'PRAGMA journal_mode=WAL;',
+        },
     }
 }
 

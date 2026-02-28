@@ -12,6 +12,9 @@ export default function NavigationBar() {
         <a href="#features" className="nav-link">
           System
         </a>
+        <Link href="/demo" className="nav-link">
+          Demo
+        </Link>
         <Link href="/dashboard" className="nav-link cta">
           Operator Dashboard →
         </Link>

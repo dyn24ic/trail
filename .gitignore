@@ -4,6 +4,11 @@ node_modules/
 out/
 dist/
 .env.local
+.env.example
+.env.frontend
+.env.backend
+**/.env.example
+**/.env.local
 .env*.local
 
 # ── Python / Django (frontend/) ─────────────────
@@ -30,3 +35,10 @@ frontend/media/
 
 # ── Logs ─────────────────────────────────────────
 *.log
+
+# ── Scala / Scala CLI ───────────────────────────
+.scala-build/
+.bloop/
+.metals/
+.bsp/
+target/
