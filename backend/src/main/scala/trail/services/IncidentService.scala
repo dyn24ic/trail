@@ -7,11 +7,12 @@ import trail.domain.*
 import trail.repository.IncidentRepository
 
 class IncidentService(
-  repo:           IncidentRepository,
-  zonePredictor:  SearchZonePredictorService,
-  droneDispatch:  DroneDispatchService,
-  triageService:  TriageService,
-  routingService: ResponderRoutingService
+  repo:            IncidentRepository,
+  zonePredictor:   SearchZonePredictorService,
+  droneDispatch:   DroneDispatchService,
+  triageService:   TriageService,
+  routingService:  ResponderRoutingService,
+  postMortemSvc:   PostMortemService
 ):
   // Mock fixed trailhead for responder routing
   private val TrailheadLat = -33.8688
@@ -80,26 +81,35 @@ class IncidentService(
                      IO.pure(postDrone)
                  }
 
-      _ <- {
-             if droneResult.victimFound then
-               for {
-                 r  <- routingService.route(
-                         TrailheadLat,
-                         TrailheadLng,
-                         droneResult.victimLat.getOrElse(incident.locationLat.getOrElse(0.0)),
-                         droneResult.victimLng.getOrElse(incident.locationLng.getOrElse(0.0)),
-                         triaged.triage.get
-                       )
-                 up =  triaged.copy(
-                         status    = IncidentStatus.Routed,
-                         route     = Some(r),
-                         updatedAt = Instant.now().toString
-                       )
-                 _  <- repo.updateFull(up)
-               } yield ()
-             else
-               IO.unit
-           }
+      preReport <- {
+                     if droneResult.victimFound then
+                       for {
+                         r  <- routingService.route(
+                                 TrailheadLat,
+                                 TrailheadLng,
+                                 droneResult.victimLat.getOrElse(incident.locationLat.getOrElse(0.0)),
+                                 droneResult.victimLng.getOrElse(incident.locationLng.getOrElse(0.0)),
+                                 triaged.triage.get
+                               )
+                         up =  triaged.copy(
+                                 status    = IncidentStatus.Routed,
+                                 route     = Some(r),
+                                 updatedAt = Instant.now().toString
+                               )
+                         _  <- repo.updateFull(up)
+                       } yield up
+                     else
+                       IO.pure(postDrone)
+                   }
+
+      // ── Stage 5: Post-mortem report ────────────────────────────────────
+      report <- postMortemSvc.generate(preReport)
+      closed  =  preReport.copy(
+                   status    = IncidentStatus.Closed,
+                   report    = Some(report),
+                   updatedAt = Instant.now().toString
+                 )
+      _      <- repo.updateFull(closed)
     yield ()
 
   def getIncident(id: String): IO[Option[Incident]] =
@@ -107,3 +117,6 @@ class IncidentService(
 
   def listIncidents: IO[List[Incident]] =
     repo.findAll
+
+  def getReport(id: String): IO[Option[IncidentReport]] =
+    repo.findById(id).map(_.flatMap(_.report))

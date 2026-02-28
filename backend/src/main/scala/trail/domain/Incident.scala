@@ -29,7 +29,8 @@ final case class Incident(
   triage: Option[InjuryTriage],
   route: Option[ResponderRoute],
   createdAt: String,
-  updatedAt: String
+  updatedAt: String,
+  report: Option[IncidentReport] = None
 )
 
 object Incident:

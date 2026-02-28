@@ -27,7 +27,8 @@ class IncidentRepository(xa: Transactor[IO]):
     triage: Option[String],
     route: Option[String],
     createdAt: String,
-    updatedAt: String
+    updatedAt: String,
+    report: Option[String]
   ): Incident =
     val parsedStatus =
       decode[IncidentStatus](s""""$status"""").getOrElse(IncidentStatus.Triggered)
@@ -43,7 +44,8 @@ class IncidentRepository(xa: Transactor[IO]):
       triage         = decodeOpt[InjuryTriage](triage),
       route          = decodeOpt[ResponderRoute](route),
       createdAt      = createdAt,
-      updatedAt      = updatedAt
+      updatedAt      = updatedAt,
+      report         = decodeOpt[IncidentReport](report)
     )
 
   def create(incident: Incident): IO[Unit] =
@@ -70,11 +72,11 @@ class IncidentRepository(xa: Transactor[IO]):
       SELECT id, trigger_type, trigger_payload, status,
              location_lat, location_lng,
              search_zones, drone_result, triage, route,
-             created_at, updated_at
+             created_at, updated_at, report
       FROM incidents WHERE id = $id
     """.query[(String, String, String, String, Option[Double], Option[Double],
                Option[String], Option[String], Option[String], Option[String],
-               String, String)]
+               String, String, Option[String])]
       .option
       .transact(xa)
       .map(_.map(rowToIncident.tupled))
@@ -84,11 +86,11 @@ class IncidentRepository(xa: Transactor[IO]):
       SELECT id, trigger_type, trigger_payload, status,
              location_lat, location_lng,
              search_zones, drone_result, triage, route,
-             created_at, updated_at
+             created_at, updated_at, report
       FROM incidents ORDER BY created_at DESC
     """.query[(String, String, String, String, Option[Double], Option[Double],
                Option[String], Option[String], Option[String], Option[String],
-               String, String)]
+               String, String, Option[String])]
       .to[List]
       .transact(xa)
       .map(_.map(rowToIncident.tupled))
@@ -102,6 +104,7 @@ class IncidentRepository(xa: Transactor[IO]):
         drone_result = ${encodeOpt(incident.droneResult)},
         triage       = ${encodeOpt(incident.triage)},
         route        = ${encodeOpt(incident.route)},
+        report       = ${encodeOpt(incident.report)},
         updated_at   = ${incident.updatedAt}
       WHERE id = ${incident.id}
     """.update.run.transact(xa).void
