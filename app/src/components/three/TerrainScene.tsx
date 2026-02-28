@@ -34,6 +34,7 @@ export default function TerrainScene({ layers }: Props) {
 
     function resize() {
       const rect = canvas!.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) return;
       renderer.setSize(rect.width, rect.height, false);
       camera.aspect = rect.width / rect.height;
       camera.updateProjectionMatrix();
