@@ -1063,6 +1063,7 @@ footer {
   will-change: transform;
 }
 @keyframes tickerScroll { 0% { transform: translateX(0); } 100% { transform: translateX(-50%); } }
+@keyframes spin { to { transform: rotate(360deg); } }
 .log-entry { display: inline-flex; align-items: center; gap: 10px; padding: 0 28px; border-right: 1px solid var(--db-border2); }
 .log-entry .ts { font-family: 'Share Tech Mono', monospace; font-size: 0.58rem; color: var(--db-muted); letter-spacing: 0.05em; }
 .ev-ok   { font-size: 0.6rem; color: var(--db-text); letter-spacing: 0.04em; }

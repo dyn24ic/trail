@@ -51,119 +51,54 @@ interface Props {
   hotspotData?: HotspotPredictionResponse | null;
   placementData?: PlacementSuggestions | null;
   onControlsReady?: (ctrl: CameraControls) => void;
+  onSatStatus?: (status: "loading" | "loaded" | "error") => void;
 }
 
-// ── Satellite tile loading ────────────────────────────────────────────────────
+// ── Satellite image loading ───────────────────────────────────────────────────
+// Uses the Esri MapServer export API to fetch one high-res image for the whole
+// bbox instead of stitching hundreds of tiles (which causes black patches from
+// rate-limiting at higher zoom levels).
 
-const SAT_ZOOM = 13;
-
-// lat → Web Mercator tile fraction (y increases downward = south)
-function lat2merc(lat: number): number {
-  const r = (lat * Math.PI) / 180;
-  return (1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2;
-}
-
-// Fetch satellite tiles, stitch, then crop to the exact bbox pixels.
-// Returns a CanvasTexture that maps 1:1 to PlaneGeometry default UVs — no UV math needed.
 async function fetchSatTexture(bbox: BBox): Promise<THREE.Texture | null> {
   try {
-    const z = SAT_ZOOM,
-      n = 2 ** z,
-      TS = 256;
+    // Request at 4096px — single CDN call, no stitching, no rate-limit issues.
+    // The bbox spans are equal in degrees so a square image is correct.
+    const PX = 4096;
+    const url =
+      `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/export` +
+      `?bbox=${bbox.west},${bbox.south},${bbox.east},${bbox.north}` +
+      `&bboxSR=4326&size=${PX},${PX}&imageSR=4326&format=jpg&f=image`;
 
-    // Tile range with 1-tile padding so edges are never cut
-    const xMin = Math.floor(((bbox.west + 180) / 360) * n) - 1;
-    const xMax = Math.floor(((bbox.east + 180) / 360) * n) + 1;
-    const yMin = Math.floor(lat2merc(bbox.north) * n) - 1;
-    const yMax = Math.floor(lat2merc(bbox.south) * n) + 1;
+    console.log('[SAT] fetching export image…');
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
-    const cols = xMax - xMin + 1;
-    const rows = yMax - yMin + 1;
+    const blob = await res.blob();
+    const bmp  = await createImageBitmap(blob);
 
-    console.log(
-      `[SAT] zoom=${z} grid=${cols}×${rows} (${cols * rows} tiles)  xMin=${xMin} yMin=${yMin}`,
-    );
+    // Draw onto a canvas so Three.js CanvasTexture can consume it.
+    // flipY=true (default): canvas top (north) → v=1, bottom (south) → v=0,
+    // matching PlaneGeometry UVs after rotateX.
+    const cv = document.createElement('canvas');
+    cv.width  = bmp.width;
+    cv.height = bmp.height;
+    cv.getContext('2d')!.drawImage(bmp, 0, 0);
 
-    // Stitch all tiles into one canvas
-    const raw = document.createElement("canvas");
-    raw.width = cols * TS;
-    raw.height = rows * TS;
-    const ctx = raw.getContext("2d")!;
-
-    // Esri World Imagery — free, no key, browser CORS ✓, URL: /{z}/{y}/{x}
-    let ok = 0,
-      fail = 0;
-    await Promise.all(
-      Array.from({ length: rows * cols }, (_, i) => {
-        const tx = xMin + (i % cols);
-        const ty = yMin + Math.floor(i / cols);
-        const url = `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${ty}/${tx}`;
-        return fetch(url)
-          .then((r) => {
-            if (!r.ok) throw new Error(`${r.status}`);
-            return r.blob();
-          })
-          .then((b) => createImageBitmap(b))
-          .then((bmp) => {
-            ctx.drawImage(bmp, (tx - xMin) * TS, (ty - yMin) * TS);
-            ok++;
-          })
-          .catch((e) => {
-            console.warn(`[SAT] tile z=${z} y=${ty} x=${tx} FAILED:`, e);
-            fail++;
-          });
-      }),
-    );
-
-    console.log(
-      `[SAT] fetch done: ${ok} ok, ${fail} failed. Raw canvas: ${raw.width}×${raw.height}px`,
-    );
-
-    // Pixel coords of the exact bbox edges within the stitched canvas
-    const pxL = (((bbox.west + 180) / 360) * n - xMin) * TS;
-    const pxR = (((bbox.east + 180) / 360) * n - xMin) * TS;
-    const pyT = (lat2merc(bbox.north) * n - yMin) * TS; // north = smaller y (top)
-    const pyB = (lat2merc(bbox.south) * n - yMin) * TS; // south = larger y (bottom)
-
-    const cropW = Math.round(pxR - pxL);
-    const cropH = Math.round(pyB - pyT);
-
-    console.log(
-      `[SAT] crop: pxL=${pxL.toFixed(1)} pxR=${pxR.toFixed(1)} pyT=${pyT.toFixed(1)} pyB=${pyB.toFixed(1)}  → ${cropW}×${cropH}px`,
-    );
-
-    // Crop to exact bbox pixels
-    const crop = document.createElement("canvas");
-    crop.width = cropW;
-    crop.height = cropH;
-    crop
-      .getContext("2d")!
-      .drawImage(
-        raw,
-        Math.round(pxL),
-        Math.round(pyT),
-        cropW,
-        cropH,
-        0,
-        0,
-        cropW,
-        cropH,
-      );
-
-    console.log(`[SAT] texture ready: ${crop.width}×${crop.height}px`);
-
-    // CanvasTexture flipY=true (default): canvas top (north) → texture v=1, canvas bottom (south) → v=0
-    // PlaneGeometry (after rotateX): UV v=0 = south, v=1 = north — perfect 1:1 match
-    return new THREE.CanvasTexture(crop);
+    console.log(`[SAT] export texture ready: ${cv.width}×${cv.height}px`);
+    return new THREE.CanvasTexture(cv);
   } catch (e) {
-    console.error("[SAT] fetchSatTexture threw:", e);
+    console.error('[SAT] fetchSatTexture threw:', e);
     return null;
   }
 }
 
 // ── Text sprite ───────────────────────────────────────────────────────────────
 
-function makeTextSprite(text: string, hexColor: string, scale = 1.0): THREE.Sprite {
+function makeTextSprite(
+  text: string,
+  hexColor: string,
+  scale = 1.0,
+): THREE.Sprite {
   // Render at 4× logical resolution for crisp text at any zoom
   const DPR = 4;
   const PAD_X = 14,
@@ -234,6 +169,7 @@ export default function TerrainScene({
   hotspotData,
   placementData,
   onControlsReady,
+  onSatStatus,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const elevData = useTerrainGrid(YOSEMITE_BBOX, MESH_RES);
@@ -246,14 +182,30 @@ export default function TerrainScene({
   const hotspotRef = useRef<HotspotPredictionResponse | null>(null);
   const placementRef = useRef<PlacementSuggestions | null>(null);
 
-  useEffect(() => { elevRef.current = elevData; }, [elevData]);
-  useEffect(() => { layersRef.current = layers; }, [layers]);
-  useEffect(() => { viewModeRef.current = viewMode; }, [viewMode]);
-  useEffect(() => { focusModeRef.current = focusMode ?? false; }, [focusMode]);
-  useEffect(() => { boxZoomModeRef.current = boxZoomMode ?? false; }, [boxZoomMode]);
-  useEffect(() => { dangerZonesRef.current = dangerZones ?? []; }, [dangerZones]);
-  useEffect(() => { hotspotRef.current = hotspotData ?? null; }, [hotspotData]);
-  useEffect(() => { placementRef.current = placementData ?? null; }, [placementData]);
+  useEffect(() => {
+    elevRef.current = elevData;
+  }, [elevData]);
+  useEffect(() => {
+    layersRef.current = layers;
+  }, [layers]);
+  useEffect(() => {
+    viewModeRef.current = viewMode;
+  }, [viewMode]);
+  useEffect(() => {
+    focusModeRef.current = focusMode ?? false;
+  }, [focusMode]);
+  useEffect(() => {
+    boxZoomModeRef.current = boxZoomMode ?? false;
+  }, [boxZoomMode]);
+  useEffect(() => {
+    dangerZonesRef.current = dangerZones ?? [];
+  }, [dangerZones]);
+  useEffect(() => {
+    hotspotRef.current = hotspotData ?? null;
+  }, [hotspotData]);
+  useEffect(() => {
+    placementRef.current = placementData ?? null;
+  }, [placementData]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -407,15 +359,25 @@ export default function TerrainScene({
         const t = Math.min(1, h / 4.5);
         let r, g, b;
         if (t < 0.05) {
-          r = 0.05; g = 0.09; b = 0.06;
+          r = 0.05;
+          g = 0.09;
+          b = 0.06;
         } else if (t < 0.15) {
-          r = 0.07 + t * 0.25; g = 0.13 + t * 0.4; b = 0.06;
+          r = 0.07 + t * 0.25;
+          g = 0.13 + t * 0.4;
+          b = 0.06;
         } else if (t < 0.35) {
-          r = 0.15 + t * 0.45; g = 0.16 + t * 0.4; b = 0.1 + t * 0.3;
+          r = 0.15 + t * 0.45;
+          g = 0.16 + t * 0.4;
+          b = 0.1 + t * 0.3;
         } else if (t < 0.58) {
-          r = 0.32 + t * 0.35; g = 0.3 + t * 0.28; b = 0.26 + t * 0.22;
+          r = 0.32 + t * 0.35;
+          g = 0.3 + t * 0.28;
+          b = 0.26 + t * 0.22;
         } else if (t < 0.8) {
-          r = 0.48 + t * 0.2; g = 0.46 + t * 0.16; b = 0.44 + t * 0.14;
+          r = 0.48 + t * 0.2;
+          g = 0.46 + t * 0.16;
+          b = 0.44 + t * 0.14;
         } else {
           r = 0.66 + (t - 0.8) * 1.4;
           g = 0.68 + (t - 0.8) * 1.1;
@@ -477,10 +439,18 @@ export default function TerrainScene({
       // Flat bottom cap — same dark base colour, both winding directions
       const b = pos.length / 3;
       pos.push(
-        -SZ_W / 2, SKIRT_FLOOR, -SZ_H / 2,
-         SZ_W / 2, SKIRT_FLOOR, -SZ_H / 2,
-         SZ_W / 2, SKIRT_FLOOR,  SZ_H / 2,
-        -SZ_W / 2, SKIRT_FLOOR,  SZ_H / 2,
+        -SZ_W / 2,
+        SKIRT_FLOOR,
+        -SZ_H / 2,
+        SZ_W / 2,
+        SKIRT_FLOOR,
+        -SZ_H / 2,
+        SZ_W / 2,
+        SKIRT_FLOOR,
+        SZ_H / 2,
+        -SZ_W / 2,
+        SKIRT_FLOOR,
+        SZ_H / 2,
       );
       for (let i = 0; i < 4; i++) col.push(...BASE);
       idx.push(b, b + 1, b + 2, b, b + 2, b + 3); // top face
@@ -488,12 +458,15 @@ export default function TerrainScene({
 
       const geo = new THREE.BufferGeometry();
       geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
-      geo.setAttribute("color",    new THREE.Float32BufferAttribute(col, 3));
+      geo.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
       geo.setIndex(idx);
       geo.computeVertexNormals();
       skirtMesh = new THREE.Mesh(
         geo,
-        new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide }),
+        new THREE.MeshLambertMaterial({
+          vertexColors: true,
+          side: THREE.DoubleSide,
+        }),
       );
       scene.add(skirtMesh);
     }
@@ -663,10 +636,10 @@ export default function TerrainScene({
       const g = addSurfGroup(x, z);
 
       const dot = new THREE.Mesh(
-        new THREE.SphereGeometry(0.10, 10, 10),
+        new THREE.SphereGeometry(0.1, 10, 10),
         new THREE.MeshBasicMaterial({ color: inc.color }),
       );
-      dot.position.y = 0.10;
+      dot.position.y = 0.1;
       g.add(dot);
 
       const pulseMat = new THREE.MeshBasicMaterial({
@@ -833,7 +806,7 @@ export default function TerrainScene({
       );
 
       const diamond = new THREE.Mesh(
-        new THREE.OctahedronGeometry(0.10, 0),
+        new THREE.OctahedronGeometry(0.1, 0),
         new THREE.MeshBasicMaterial({ color: lm.color }),
       );
       diamond.position.y = 1.1;
@@ -867,11 +840,18 @@ export default function TerrainScene({
     const satelliteMat = new THREE.MeshBasicMaterial({ side: THREE.FrontSide });
     let satelliteLoaded = false;
 
+    onSatStatus?.("loading");
     fetchSatTexture(YOSEMITE_BBOX).then((tex) => {
-      if (!tex) return;
+      if (!tex) {
+        onSatStatus?.("error");
+        return;
+      }
+      tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+      tex.needsUpdate = true;
       satelliteMat.map = tex;
       satelliteMat.needsUpdate = true;
       satelliteLoaded = true;
+      onSatStatus?.("loaded");
     });
 
     // ── Hotspot + placement groups ────────────────────────────────────
@@ -919,7 +899,13 @@ export default function TerrainScene({
     function buildHotspotMeshes(zones: HotspotPredictionResponse["hotspots"]) {
       hotspotAnims.length = 0;
       zones.forEach((zone) => {
-        const { x, z } = latLonToMesh(zone.lat, zone.lon, YOSEMITE_BBOX, SZ_W, SZ_H);
+        const { x, z } = latLonToMesh(
+          zone.lat,
+          zone.lon,
+          YOSEMITE_BBOX,
+          SZ_W,
+          SZ_H,
+        );
         const y = surf(x, z);
         const meshRadius = zone.radiusMeters / M_PER_UNIT;
         const color = RISK_COLORS[zone.riskLevel] ?? 0xff8c42;
@@ -963,7 +949,11 @@ export default function TerrainScene({
 
         // Label sprite above zone
         const colorHex = "#" + color.toString(16).padStart(6, "0");
-        const label = makeTextSprite(zone.riskLevel.toUpperCase(), colorHex, 0.7);
+        const label = makeTextSprite(
+          zone.riskLevel.toUpperCase(),
+          colorHex,
+          0.7,
+        );
         label.position.set(x, y + 1.2, z);
         hotspotGroup.add(label);
       });
@@ -1003,7 +993,13 @@ export default function TerrainScene({
 
       // Call box suggestions — magenta wireframe box
       pl.callBoxes.forEach((cb) => {
-        const { x, z } = latLonToMesh(cb.lat, cb.lon, YOSEMITE_BBOX, SZ_W, SZ_H);
+        const { x, z } = latLonToMesh(
+          cb.lat,
+          cb.lon,
+          YOSEMITE_BBOX,
+          SZ_W,
+          SZ_H,
+        );
         const y = surf(x, z);
 
         const boxEdges = new THREE.EdgesGeometry(
@@ -1024,11 +1020,14 @@ export default function TerrainScene({
 
     // ── Yosemite boundary — hugs terrain, rebuilt when elevation loads ─
     const BSTEPS = 80; // more samples = smoother line on real DEM
-    const hwX = SZ_W / 2, hwZ = SZ_H / 2;
+    const hwX = SZ_W / 2,
+      hwZ = SZ_H / 2;
 
     function terrainEdgePoints(
-      x0: number, z0: number,
-      x1: number, z1: number,
+      x0: number,
+      z0: number,
+      x1: number,
+      z1: number,
     ): THREE.Vector3[] {
       return Array.from({ length: BSTEPS + 1 }, (_, i) => {
         const t = i / BSTEPS;
@@ -1042,17 +1041,22 @@ export default function TerrainScene({
     }
 
     const boundaryLineMat = new THREE.LineBasicMaterial({
-      color: 0xffd700, transparent: true, opacity: 0.85,
+      color: 0xffd700,
+      transparent: true,
+      opacity: 0.85,
     });
-    const boundaryLine = new THREE.Line(new THREE.BufferGeometry(), boundaryLineMat);
+    const boundaryLine = new THREE.Line(
+      new THREE.BufferGeometry(),
+      boundaryLineMat,
+    );
     scene.add(boundaryLine);
 
     function rebuildBoundary() {
       const pts = [
-        ...terrainEdgePoints(-hwX, -hwZ,  hwX, -hwZ), // north
-        ...terrainEdgePoints( hwX, -hwZ,  hwX,  hwZ), // east
-        ...terrainEdgePoints( hwX,  hwZ, -hwX,  hwZ), // south
-        ...terrainEdgePoints(-hwX,  hwZ, -hwX, -hwZ), // west
+        ...terrainEdgePoints(-hwX, -hwZ, hwX, -hwZ), // north
+        ...terrainEdgePoints(hwX, -hwZ, hwX, hwZ), // east
+        ...terrainEdgePoints(hwX, hwZ, -hwX, hwZ), // south
+        ...terrainEdgePoints(-hwX, hwZ, -hwX, -hwZ), // west
       ];
       boundaryLine.geometry.dispose();
       boundaryLine.geometry = new THREE.BufferGeometry().setFromPoints(pts);
@@ -1088,19 +1092,24 @@ export default function TerrainScene({
     // Raycast all 4 corners of the selection rect, compute world bounding box,
     // then calculate exact camera height so the area fills the screen.
     function startBoxZoomTween(
-      sx: number, sy: number, // screen start (mousedown)
-      ex: number, ey: number, // screen end   (mouseup)
+      sx: number,
+      sy: number, // screen start (mousedown)
+      ex: number,
+      ey: number, // screen end   (mouseup)
       rect: DOMRectReadOnly,
     ) {
-      const toNDC = (px: number, py: number) => new THREE.Vector2(
-        ((px - rect.left) / rect.width) * 2 - 1,
-        -((py - rect.top) / rect.height) * 2 + 1,
-      );
+      const toNDC = (px: number, py: number) =>
+        new THREE.Vector2(
+          ((px - rect.left) / rect.width) * 2 - 1,
+          -((py - rect.top) / rect.height) * 2 + 1,
+        );
 
       // Raycast the 4 corners of the drawn box to the terrain
       const corners = [
-        toNDC(sx, sy), toNDC(ex, sy),
-        toNDC(sx, ey), toNDC(ex, ey),
+        toNDC(sx, sy),
+        toNDC(ex, sy),
+        toNDC(sx, ey),
+        toNDC(ex, ey),
       ];
       const ray = new THREE.Raycaster();
       const pts: THREE.Vector3[] = [];
@@ -1122,15 +1131,19 @@ export default function TerrainScene({
       // Solve for d so the region exactly fills the screen (with 10% padding)
       const fovRad = (camera.fov * Math.PI) / 180;
       const tanHalfFov = Math.tan(fovRad / 2);
-      const distForHeight = (size.z / 2 * 1.1) / tanHalfFov;
-      const distForWidth  = (size.x / 2 * 1.1) / (tanHalfFov * camera.aspect);
+      const distForHeight = ((size.z / 2) * 1.1) / tanHalfFov;
+      const distForWidth = ((size.x / 2) * 1.1) / (tanHalfFov * camera.aspect);
       const ZOOM_DIST = Math.max(distForHeight, distForWidth, 1.5);
 
       focusTween = {
         fromPos: camera.position.clone(),
         fromTarget: controls.target.clone(),
         // Nearly top-down: tiny z offset to avoid gimbal flip
-        toPos: new THREE.Vector3(center.x, center.y + ZOOM_DIST, center.z + ZOOM_DIST * 0.04),
+        toPos: new THREE.Vector3(
+          center.x,
+          center.y + ZOOM_DIST,
+          center.z + ZOOM_DIST * 0.04,
+        ),
         toTarget: new THREE.Vector3(center.x, center.y, center.z),
         t: 0,
       };
@@ -1180,10 +1193,17 @@ export default function TerrainScene({
     const onMouseUp = (e: MouseEvent) => {
       if (!boxStart) return;
 
-      if (boxOverlay) { boxOverlay.remove(); boxOverlay = null; }
+      if (boxOverlay) {
+        boxOverlay.remove();
+        boxOverlay = null;
+      }
       controls.enabled = true;
 
-      if (boxDragged && Math.abs(e.clientX - boxStart.x) > 8 && Math.abs(e.clientY - boxStart.y) > 8) {
+      if (
+        boxDragged &&
+        Math.abs(e.clientX - boxStart.x) > 8 &&
+        Math.abs(e.clientY - boxStart.y) > 8
+      ) {
         const rect = canvas!.getBoundingClientRect();
         startBoxZoomTween(boxStart.x, boxStart.y, e.clientX, e.clientY, rect);
       }
@@ -1299,15 +1319,23 @@ export default function TerrainScene({
       addBackendZones();
 
       // Layer visibility
-      zoneGroups.forEach((g) => { g.visible = L.zones; });
-      backendZoneGroups.forEach((g) => { g.visible = L.zones; });
-      landmarkGroups.forEach((g) => { g.visible = L.landmarks; });
+      zoneGroups.forEach((g) => {
+        g.visible = L.zones;
+      });
+      backendZoneGroups.forEach((g) => {
+        g.visible = L.zones;
+      });
+      landmarkGroups.forEach((g) => {
+        g.visible = L.landmarks;
+      });
 
       // Scale all surface markers proportionally to camera distance
       // so labels & dots stay readable when zoomed out and uncluttered when zoomed in
       const dist = camera.position.distanceTo(controls.target);
       const markerScale = THREE.MathUtils.clamp(dist / 28, 0.12, 2.5);
-      surfGroups.forEach(({ group }) => { group.scale.setScalar(markerScale); });
+      surfGroups.forEach(({ group }) => {
+        group.scale.setScalar(markerScale);
+      });
 
       // Sensor pulse
       sensorAnims.forEach(({ ring, mat, phase, dot }) => {
@@ -1402,7 +1430,10 @@ export default function TerrainScene({
       canvas.removeEventListener("mousemove", onMouseMove);
       canvas.removeEventListener("mouseup", onMouseUp);
       canvas.removeEventListener("click", onClick);
-      if (boxOverlay) { boxOverlay.remove(); boxOverlay = null; }
+      if (boxOverlay) {
+        boxOverlay.remove();
+        boxOverlay = null;
+      }
     };
   }, []);
 
@@ -1410,7 +1441,7 @@ export default function TerrainScene({
     <canvas
       ref={canvasRef}
       className="terrain-canvas"
-      style={boxZoomMode ? { cursor: 'crosshair' } : undefined}
+      style={boxZoomMode ? { cursor: "crosshair" } : undefined}
     />
   );
 }

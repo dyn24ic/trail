@@ -25,6 +25,7 @@ export default function MapContainer() {
   const [viewMode, setViewMode] = useState<'3d' | 'wireframe'>('3d');
   const [focusMode, setFocusMode] = useState(false);
   const [boxZoomMode, setBoxZoomMode] = useState(false);
+  const [satStatus, setSatStatus] = useState<'idle' | 'loading' | 'loaded' | 'error'>('idle');
   const [dangerZones, setDangerZones] = useState<DangerZone[]>([]);
   const cameraControlsRef = useRef<CameraControls | null>(null);
 
@@ -113,6 +114,7 @@ export default function MapContainer() {
         hotspotData={hotspots.data}
         placementData={hotspots.placement}
         onControlsReady={(ctrl) => { cameraControlsRef.current = ctrl; }}
+        onSatStatus={setSatStatus}
       />
 
       {/* Box-zoom toggle — top-right corner of the map */}
@@ -139,6 +141,39 @@ export default function MapContainer() {
       >
         {boxZoomMode ? '⬚ ZOOM ON' : '⬚ BOX ZOOM'}
       </button>
+
+      {/* Satellite loading indicator */}
+      {layers.osm && satStatus === 'loading' && (
+        <div style={{
+          position: 'absolute',
+          top: '50%',
+          left: '50%',
+          transform: 'translate(-50%, -50%)',
+          background: 'rgba(4,11,11,0.88)',
+          border: '1px solid rgba(136,187,255,0.5)',
+          color: '#88bbff',
+          borderRadius: '6px',
+          padding: '10px 18px',
+          fontSize: '12px',
+          fontFamily: 'monospace',
+          letterSpacing: '0.08em',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '10px',
+          pointerEvents: 'none',
+          zIndex: 20,
+          backdropFilter: 'blur(6px)',
+        }}>
+          <span style={{
+            width: '10px', height: '10px', borderRadius: '50%',
+            border: '2px solid rgba(136,187,255,0.3)',
+            borderTopColor: '#88bbff',
+            display: 'inline-block',
+            animation: 'spin 0.9s linear infinite',
+          }} />
+          LOADING SATELLITE IMAGERY
+        </div>
+      )}
 
       <div className="scan-indicator">
         <span className="status-dot"></span>
