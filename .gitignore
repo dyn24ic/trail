@@ -1,0 +1,27 @@
+# scala-cli
+.scala-build/
+.bsp/
+
+
+# SQLite databases
+*.db
+*.db-shm
+*.db-wal
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Node / frontend
+node_modules/
+dist/
+.next/
+.nuxt/
