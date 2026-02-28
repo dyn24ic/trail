@@ -14,7 +14,9 @@ export default function MapContainer() {
     drones: true,
     incidents: true,
     zones: true,
+    landmarks: true,
   });
+  const [viewMode, setViewMode] = useState<'3d' | 'wireframe'>('3d');
 
   const toggle = (name: keyof typeof layers) => {
     setLayers((prev) => ({ ...prev, [name]: !prev[name] }));
@@ -26,12 +28,30 @@ export default function MapContainer() {
         <div className="map-tab active">3D Terrain</div>
         <div className="map-tab">Risk Heatmap</div>
         <div className="map-tab">Incident Log</div>
+
+        {/* View mode toggle */}
+        <div className="view-toggle">
+          <button
+            className={`view-btn${viewMode === '3d' ? ' active' : ''}`}
+            onClick={() => setViewMode('3d')}
+          >
+            3D
+          </button>
+          <button
+            className={`view-btn${viewMode === 'wireframe' ? ' active' : ''}`}
+            onClick={() => setViewMode('wireframe')}
+          >
+            Wire
+          </button>
+        </div>
+
         <div className="map-layers">
           {([
             ['sensors',   'sensors',   'var(--db-green)'],
             ['drones',    'drones',    'var(--db-amber)'],
             ['incidents', 'incidents', 'var(--db-red)'],
-            ['zones',     'search zones', 'var(--db-blue)'],
+            ['zones',     'zones',     'var(--db-blue)'],
+            ['landmarks', 'landmarks', '#FFD700'],
           ] as const).map(([key, label, color]) => (
             <div
               key={key}
@@ -45,11 +65,15 @@ export default function MapContainer() {
         </div>
       </div>
 
-      <TerrainScene layers={layers} />
+      <TerrainScene layers={layers} viewMode={viewMode} />
 
       <div className="scan-indicator">
         <span className="status-dot"></span>
         LIVE · Yosemite National Park · 37.7459°N 119.5332°W
+      </div>
+
+      <div className="map-hint">
+        drag to orbit · scroll to zoom · right-drag to pan
       </div>
 
       <div className="map-coords">
@@ -65,7 +89,7 @@ export default function MapContainer() {
         <div className="legend-item"><span className="legend-dot" style={{ background: 'var(--db-red)' }}></span>Incident · Critical</div>
         <div className="legend-item"><span className="legend-dot" style={{ background: 'var(--db-yellow)' }}></span>Incident · Warning</div>
         <div className="legend-item"><span className="legend-line" style={{ background: 'rgba(74,159,212,0.6)' }}></span>Search Zone</div>
-        <div className="legend-item"><span className="legend-line" style={{ background: 'var(--db-amber)' }}></span>Trail Route</div>
+        <div className="legend-item"><span className="legend-dot" style={{ background: '#FFD700' }}></span>Landmark</div>
       </div>
 
       <div id="source-badge" className="source-badge procedural">Procedural</div>

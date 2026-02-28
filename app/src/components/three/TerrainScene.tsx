@@ -2,28 +2,57 @@
 
 import { useEffect, useRef } from 'react';
 import * as THREE from 'three';
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { useTerrainGrid } from './useTerrainGrid';
 import { YOSEMITE_BBOX, MESH_SIZE, MESH_RES } from '@/data/trailBbox';
 import { sensorData } from '@/data/sensors';
 import { droneData } from '@/data/drones';
 import { incidentData } from '@/data/incidents';
+import { landmarkData } from '@/data/landmarks';
 import { yosemiteH } from '@/lib/elevation/fallbackTerrain';
 import { demGridToVertexHeights, latLonToMesh, heightAtMeshPos } from '@/lib/coordMapping';
 import type { ElevationResponse } from '@/types/elevation';
 
 interface Props {
-  layers: { sensors: boolean; drones: boolean; incidents: boolean; zones: boolean };
+  layers: { sensors: boolean; drones: boolean; incidents: boolean; zones: boolean; landmarks: boolean };
+  viewMode: '3d' | 'wireframe';
 }
 
-export default function TerrainScene({ layers }: Props) {
+function makeTextSprite(text: string, hexColor: string): THREE.Sprite {
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d')!;
+  const font = '500 18px monospace';
+  ctx.font = font;
+  const textW = ctx.measureText(text).width;
+  const w = Math.ceil(textW) + 20;
+  const h = 30;
+  canvas.width = w;
+  canvas.height = h;
+  ctx.font = font;
+  ctx.fillStyle = 'rgba(4,11,11,0.82)';
+  ctx.fillRect(0, 0, w, h);
+  ctx.strokeStyle = hexColor;
+  ctx.lineWidth = 1;
+  ctx.strokeRect(0.5, 0.5, w - 1, h - 1);
+  ctx.fillStyle = hexColor;
+  ctx.fillText(text, 10, 20);
+  const tex = new THREE.CanvasTexture(canvas);
+  const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false });
+  const sprite = new THREE.Sprite(mat);
+  sprite.scale.set((w / h) * 0.9, 0.9, 1);
+  return sprite;
+}
+
+export default function TerrainScene({ layers, viewMode }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const elevData = useTerrainGrid(YOSEMITE_BBOX, MESH_RES);
   const elevRef = useRef<ElevationResponse | null>(null);
   const layersRef = useRef(layers);
+  const viewModeRef = useRef(viewMode);
 
-  // Keep refs in sync
   useEffect(() => { elevRef.current = elevData; }, [elevData]);
   useEffect(() => { layersRef.current = layers; }, [layers]);
+  useEffect(() => { viewModeRef.current = viewMode; }, [viewMode]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -32,14 +61,6 @@ export default function TerrainScene({ layers }: Props) {
     const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
     renderer.setClearColor(0x040B0B, 1);
 
-    function resize() {
-      const rect = canvas!.getBoundingClientRect();
-      if (rect.width === 0 || rect.height === 0) return;
-      renderer.setSize(rect.width, rect.height, false);
-      camera.aspect = rect.width / rect.height;
-      camera.updateProjectionMatrix();
-    }
-
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x040B0B);
     scene.fog = new THREE.FogExp2(0x040B0B, 0.025);
@@ -47,6 +68,26 @@ export default function TerrainScene({ layers }: Props) {
     const camera = new THREE.PerspectiveCamera(50, 2, 0.1, 200);
     camera.position.set(8, 11, 16);
     camera.lookAt(0, 1.5, 0);
+
+    // ── OrbitControls ─────────────────────────────────────────────────
+    const controls = new OrbitControls(camera, canvas);
+    controls.target.set(0, 1.5, 0);
+    controls.autoRotate = true;
+    controls.autoRotateSpeed = 0.4;
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.07;
+    controls.minDistance = 4;
+    controls.maxDistance = 50;
+    controls.maxPolarAngle = Math.PI / 2 - 0.02;
+    controls.zoomSpeed = 1.2;
+
+    function resize() {
+      const rect = canvas!.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) return;
+      renderer.setSize(rect.width, rect.height, false);
+      camera.aspect = rect.width / rect.height;
+      camera.updateProjectionMatrix();
+    }
 
     // Lighting
     scene.add(new THREE.AmbientLight(0x0A1A15, 1.5));
@@ -64,14 +105,12 @@ export default function TerrainScene({ layers }: Props) {
     const tPos = tGeo.attributes.position;
     const vCol = new Float32Array(tPos.count * 3);
 
-    // Initial: use procedural yosemiteH
     let heightsArray: Float32Array | null = null;
 
     function buildHeights(elev: ElevationResponse | null): Float32Array {
       if (elev && elev.grid.length === RES * RES) {
         return demGridToVertexHeights(elev.grid, RES, elev.minElev, elev.maxElev, 7.0);
       }
-      // fallback: procedural
       const arr = new Float32Array(RES * RES);
       for (let row = 0; row < RES; row++) {
         for (let col = 0; col < RES; col++) {
@@ -86,8 +125,6 @@ export default function TerrainScene({ layers }: Props) {
     function applyHeights(heights: Float32Array) {
       for (let i = 0; i < tPos.count; i++) {
         const x = tPos.getX(i), z = tPos.getZ(i);
-        // Convert mesh x,z → row,col in the heights array
-        // heights row 0 = south (Three.js PlaneGeometry after rotateX is row-major south-to-north)
         const col = Math.round((x / SZ + 0.5) * (RES - 1));
         const row = Math.round((z / SZ + 0.5) * (RES - 1));
         const h = heights[Math.max(0, Math.min(RES * RES - 1, row * RES + col))];
@@ -110,8 +147,16 @@ export default function TerrainScene({ layers }: Props) {
 
     heightsArray = buildHeights(null);
     applyHeights(heightsArray);
-    const terrainMesh = new THREE.Mesh(tGeo, new THREE.MeshLambertMaterial({ vertexColors: true }));
+    const terrainMat = new THREE.MeshLambertMaterial({ vertexColors: true });
+    const terrainMesh = new THREE.Mesh(tGeo, terrainMat);
     scene.add(terrainMesh);
+
+    // Wireframe overlay (always created, visibility toggled)
+    const wireMat = new THREE.MeshBasicMaterial({
+      color: 0x00FF88, wireframe: true, transparent: true, opacity: 0.18,
+    });
+    const wireMesh = new THREE.Mesh(tGeo, wireMat);
+    scene.add(wireMesh);
 
     // Helper: surface height at mesh x,z
     function surf(x: number, z: number): number {
@@ -120,7 +165,7 @@ export default function TerrainScene({ layers }: Props) {
     }
 
     // ── Sensor markers ────────────────────────────────────────────────
-    const sensorMeshes: { ring: THREE.Mesh; mat: THREE.MeshBasicMaterial; phase: number; state: string; dot: THREE.Mesh }[] = [];
+    const sensorMeshes: { ring: THREE.Mesh; mat: THREE.MeshBasicMaterial; phase: number; dot: THREE.Mesh }[] = [];
     const colorMap: Record<string, number> = { ok: 0x00FF88, warn: 0xFF8C42, alert: 0xFF3B3B, off: 0x445555 };
 
     sensorData.forEach((s) => {
@@ -140,7 +185,7 @@ export default function TerrainScene({ layers }: Props) {
       ring.position.set(x, sy + 0.01, z);
       ring.rotation.x = -Math.PI / 2;
       scene.add(ring);
-      sensorMeshes.push({ ring, mat, phase: Math.random() * Math.PI * 2, state: s.state, dot });
+      sensorMeshes.push({ ring, mat, phase: Math.random() * Math.PI * 2, dot });
     });
 
     // ── Drone markers ─────────────────────────────────────────────────
@@ -192,6 +237,7 @@ export default function TerrainScene({ layers }: Props) {
     });
 
     // ── Search zones ──────────────────────────────────────────────────
+    const zoneMeshes: THREE.Object3D[] = [];
     function makeSearchZone(cx: number, cz: number, rx: number, rz: number, color: number) {
       const geo = new THREE.PlaneGeometry(rx * 2, rz * 2, 1, 1);
       geo.rotateX(-Math.PI / 2);
@@ -199,25 +245,61 @@ export default function TerrainScene({ layers }: Props) {
       const mesh = new THREE.Mesh(geo, mat);
       mesh.position.set(cx, surf(cx, cz) + 0.15, cz);
       scene.add(mesh);
+      zoneMeshes.push(mesh);
       const border = new THREE.LineLoop(geo, new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.35 }));
       border.position.copy(mesh.position);
       scene.add(border);
+      zoneMeshes.push(border);
     }
 
-    // Map incident positions to zone centers
     incidentData.forEach((inc, i) => {
       const { x, z } = latLonToMesh(inc.lat, inc.lon, YOSEMITE_BBOX, SZ);
       makeSearchZone(x, z, i === 0 ? 2.5 : 2.0, i === 0 ? 2.0 : 1.8, inc.color);
     });
-    // Third zone (blue)
     {
       const { x, z } = latLonToMesh(37.7280, -119.550, YOSEMITE_BBOX, SZ);
       makeSearchZone(x, z, 3.0, 2.5, 0x4A9FD4);
     }
 
-    // ── Camera ────────────────────────────────────────────────────────
-    let camAngle = Math.atan2(camera.position.z, camera.position.x);
-    const camR = Math.sqrt(camera.position.x ** 2 + camera.position.z ** 2);
+    // ── Landmark markers ──────────────────────────────────────────────
+    const landmarkObjects: THREE.Object3D[] = [];
+
+    landmarkData.forEach((lm) => {
+      const { x, z } = latLonToMesh(lm.lat, lm.lon, YOSEMITE_BBOX, SZ);
+      const ly = surf(x, z);
+
+      // Pin stem
+      const stemGeo = new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(x, ly, z),
+        new THREE.Vector3(x, ly + 1.4, z),
+      ]);
+      const stem = new THREE.Line(stemGeo, new THREE.LineBasicMaterial({ color: lm.color, transparent: true, opacity: 0.7 }));
+      scene.add(stem);
+      landmarkObjects.push(stem);
+
+      // Diamond marker
+      const diamond = new THREE.Mesh(
+        new THREE.OctahedronGeometry(0.15, 0),
+        new THREE.MeshBasicMaterial({ color: lm.color }),
+      );
+      diamond.position.set(x, ly + 1.4, z);
+      scene.add(diamond);
+      landmarkObjects.push(diamond);
+
+      // Glow ring
+      const glowMat = new THREE.MeshBasicMaterial({ color: lm.color, transparent: true, opacity: 0.25, side: THREE.DoubleSide });
+      const glow = new THREE.Mesh(new THREE.RingGeometry(0.18, 0.28, 16), glowMat);
+      glow.position.set(x, ly + 0.01, z);
+      glow.rotation.x = -Math.PI / 2;
+      scene.add(glow);
+      landmarkObjects.push(glow);
+
+      // Text sprite
+      const sprite = makeTextSprite(lm.name, lm.colorHex);
+      sprite.position.set(x, ly + 2.1, z);
+      scene.add(sprite);
+      landmarkObjects.push(sprite);
+    });
 
     // ── Render loop ───────────────────────────────────────────────────
     let startT: number | null = null;
@@ -229,14 +311,14 @@ export default function TerrainScene({ layers }: Props) {
       if (!startT) startT = ts;
       const t = (ts - startT) / 1000;
       const L = layersRef.current;
+      const wf = viewModeRef.current === 'wireframe';
 
-      // Update terrain if elevation data changed
+      // Elevation update
       const elev = elevRef.current;
       if (elev && elev.source !== prevElevSource && elev.grid.length === RES * RES) {
         prevElevSource = elev.source;
         heightsArray = buildHeights(elev);
         applyHeights(heightsArray);
-        // Update source badge
         const badge = document.getElementById('source-badge');
         if (badge) {
           badge.className = `source-badge ${elev.source}`;
@@ -245,11 +327,15 @@ export default function TerrainScene({ layers }: Props) {
         }
       }
 
-      // Camera orbit
-      camAngle += 0.0006;
-      camera.position.x = Math.cos(camAngle) * camR;
-      camera.position.z = Math.sin(camAngle) * camR;
-      camera.lookAt(0, 1.5, 0);
+      // View mode
+      terrainMat.wireframe = wf;
+      terrainMat.vertexColors = !wf;
+      terrainMat.color.set(wf ? 0x003322 : 0xffffff);
+      wireMesh.visible = wf;
+
+      // Layer visibility
+      zoneMeshes.forEach(o => { o.visible = L.zones; });
+      landmarkObjects.forEach(o => { o.visible = L.landmarks; });
 
       // Sensor pulse
       sensorMeshes.forEach(({ ring, mat, phase, dot }) => {
@@ -278,6 +364,7 @@ export default function TerrainScene({ layers }: Props) {
         pulse.scale.setScalar(1 + Math.sin(t * 2.5 + phase) * 0.5);
       });
 
+      controls.update();
       renderer.render(scene, camera);
     }
 
@@ -289,6 +376,7 @@ export default function TerrainScene({ layers }: Props) {
     return () => {
       cancelAnimationFrame(rafId);
       ro.disconnect();
+      controls.dispose();
       renderer.dispose();
     };
   }, []);
