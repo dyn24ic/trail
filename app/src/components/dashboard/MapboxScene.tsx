@@ -21,8 +21,9 @@ interface MapboxSceneProps {
   };
   dangerZones: DangerZone[];
   hotspotData: HotspotPredictionResponse | null;
-  onMove?: (lat: number, lon: number) => void;
+  onMove?: (lat: number, lon: number, zoom: number) => void;
   boxZoomMode?: boolean;
+  flyTo?: { lat: number; lon: number; zoom: number; v: number } | null;
 }
 
 const CENTER_LAT = (YOSEMITE_BBOX.north + YOSEMITE_BBOX.south) / 2;
@@ -34,6 +35,7 @@ export default function MapboxScene({
   hotspotData,
   onMove,
   boxZoomMode = false,
+  flyTo,
 }: MapboxSceneProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
@@ -161,7 +163,7 @@ export default function MapboxScene({
 
     map.on('move', () => {
       const c = map.getCenter();
-      onMove?.(c.lat, c.lng);
+      onMove?.(c.lat, c.lng, map.getZoom());
     });
 
     return () => {
@@ -188,6 +190,24 @@ export default function MapboxScene({
       } catch {}
     }
   }, [viewMode]);
+
+  // Sync position when returning from 2D → 3D
+  useEffect(() => {
+    if (!flyTo) return;
+    const map = mapRef.current;
+    if (!map) return;
+    const apply = () => {
+      map.easeTo({
+        center: [flyTo.lon, flyTo.lat],
+        zoom: flyTo.zoom,
+        pitch: 55,
+        bearing: -20,
+        duration: 800,
+      });
+    };
+    if (map.isStyleLoaded()) apply();
+    else map.once('load', apply);
+  }, [flyTo]);
 
   // Box zoom mode
   const boxZoomModeRef = useRef(boxZoomMode);

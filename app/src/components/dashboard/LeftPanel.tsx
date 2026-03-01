@@ -212,17 +212,32 @@ function SensorsTab() {
 
 // ── Weather Tab ─────────────────────────────────────────────────────────────
 
+// 'up-bad'  → ↑ red   / ↓ green  (wind, precipitation)
+// 'up-good' → ↑ green / ↓ red    (visibility)
+// 'neutral' → ↑ amber / ↓ #88ccff (temperature — both extremes are risks)
+type DeltaSentiment = 'up-bad' | 'up-good' | 'neutral';
+
 function weatherDelta(
   current: number | null,
   prev: number | null,
   unit: string,
+  sentiment: DeltaSentiment,
   decimals = 0
-): string {
-  if (current == null || prev == null) return "—";
+): { text: string; color: string } {
+  if (current == null || prev == null) return { text: "—", color: "" };
   const diff = current - prev;
-  if (Math.abs(diff) < 0.05) return "—";
-  const sign = diff > 0 ? "▲" : "▼";
-  return `${sign} ${Math.abs(diff).toFixed(decimals)}${unit}`;
+  if (Math.abs(diff) < 0.05) return { text: "—", color: "" };
+  const isUp = diff > 0;
+  const text = `${isUp ? "▲" : "▼"} ${Math.abs(diff).toFixed(decimals)}${unit}`;
+  let color: string;
+  if (sentiment === 'neutral') {
+    color = isUp ? 'var(--db-amber)' : '#88ccff';
+  } else if (sentiment === 'up-bad') {
+    color = isUp ? 'var(--db-red)' : 'var(--db-green)';
+  } else {
+    color = isUp ? 'var(--db-green)' : 'var(--db-red)';
+  }
+  return { text, color };
 }
 
 function WeatherTab({ weather, prevWeather }: { weather: Weather | null; prevWeather: Weather | null }) {
@@ -247,7 +262,8 @@ function WeatherTab({ weather, prevWeather }: { weather: Weather | null; prevWea
       ? `${Math.floor(remainMin / 60)}h ${remainMin % 60}m`
       : "After sunset";
 
-  const cells: [string, string, string, boolean, string][] = [
+  type Cell = [string, string, string, boolean, { text: string; color: string } | null];
+  const cells: Cell[] = [
     [
       "Temperature",
       weather ? `${Math.round(weather.temperature_c)}°C` : "—",
@@ -255,21 +271,21 @@ function WeatherTab({ weather, prevWeather }: { weather: Weather | null; prevWea
         ? `Feels like ${Math.round(weather.feels_like_c)}°C · ${weather.description}`
         : "Fetching…",
       false,
-      weatherDelta(weather?.temperature_c ?? null, prevWeather?.temperature_c ?? null, "°C", 1),
+      weatherDelta(weather?.temperature_c ?? null, prevWeather?.temperature_c ?? null, "°C", 'neutral', 1),
     ],
     [
       "Wind Speed",
       windKmh != null ? `${windKmh} km/h` : "—",
       weather ? `${windDir} · ${weather.humidity_pct}% humidity` : "Fetching…",
       windWarn,
-      weatherDelta(windKmh, prevWindKmh, " km/h"),
+      weatherDelta(windKmh, prevWindKmh, " km/h", 'up-bad'),
     ],
     [
       "Visibility",
       visKm != null ? `${visKm.toFixed(0)} km` : "—",
       weather ? weather.description : "Fetching…",
       false,
-      weatherDelta(visKm, prevVisKm, " km", 1),
+      weatherDelta(visKm, prevVisKm, " km", 'up-good', 1),
     ],
     [
       "Precipitation",
@@ -286,10 +302,11 @@ function WeatherTab({ weather, prevWeather }: { weather: Weather | null; prevWea
         weather?.precipitation_mm_1h ?? null,
         prevWeather?.precipitation_mm_1h ?? null,
         " mm/h",
+        'up-bad',
         1
       ),
     ],
-    ["Daylight Remaining", daylightDisplay, "Sunset ~18:10 local", false, ""],
+    ["Daylight Remaining", daylightDisplay, "Sunset ~18:10 local", false, null],
   ];
 
   return (
@@ -299,11 +316,12 @@ function WeatherTab({ weather, prevWeather }: { weather: Weather | null; prevWea
           font-size: 0.55rem;
           letter-spacing: 0.08em;
           margin-top: 2px;
-          opacity: 0.75;
+          opacity: 0.85;
           font-family: 'Share Tech Mono', monospace;
           color: var(--db-muted);
         }
         .w-delta:not(:empty)::after { content: " vs 1h ago"; }
+        .w-delta[style*="color"]::after { content: " vs 1h ago"; }
       `}</style>
       <div
         className="panel-heading"
@@ -331,7 +349,14 @@ function WeatherTab({ weather, prevWeather }: { weather: Weather | null; prevWea
             <div className="w-label">{label}</div>
             <div className={`w-value${warn ? " warn" : ""}`}>{value}</div>
             <div className="w-sub">{sub}</div>
-            {delta !== "" && <div className="w-delta">{delta}</div>}
+            {delta != null && (
+              <div
+                className="w-delta"
+                style={delta.color ? { color: delta.color, opacity: 1 } : undefined}
+              >
+                {delta.text}
+              </div>
+            )}
           </div>
         ))}
       </div>
