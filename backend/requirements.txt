@@ -58,4 +58,5 @@ typing-inspection==0.4.2
 typing_extensions==4.15.0
 urllib3==2.6.3
 xarray==2025.11.0
+xgboost>=2.0        # xgboost_service.py — Stage 1 hotspot inference
 yarl==1.22.0
