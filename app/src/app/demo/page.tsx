@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Incident, IncidentStatus } from '@/types/backend';
+import { TRACKED_HIKERS } from '@/data/trackedHikers';
 
 // ---------------------------------------------------------------------------
 // Preset trigger scenarios
@@ -110,6 +111,13 @@ export default function DemoPage() {
   const [firing, setFiring] = useState<TriggerKind | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // Hiker simulation — track next event index per hiker locally to disable buttons
+  const [hikerNextIdx, setHikerNextIdx] = useState<Record<string, number>>(() =>
+    Object.fromEntries(TRACKED_HIKERS.map(h => [h.id, 0])),
+  );
+  const [advancingHiker, setAdvancingHiker] = useState<string | null>(null);
+  const [resetting, setResetting] = useState(false);
+
   // Poll all tracked incidents every 2 s
   const trackedRef = useRef(tracked);
   trackedRef.current = tracked;
@@ -141,6 +149,34 @@ export default function DemoPage() {
     }, 2000);
     return () => clearInterval(interval);
   }, [fetchDetail]);
+
+  async function advanceHiker(hikerId: string) {
+    setAdvancingHiker(hikerId);
+    try {
+      await fetch('/api/demo/hiker-advance', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hikerId }),
+      });
+      setHikerNextIdx(prev => ({ ...prev, [hikerId]: (prev[hikerId] ?? 0) + 1 }));
+    } finally {
+      setAdvancingHiker(null);
+    }
+  }
+
+  async function resetHikers() {
+    setResetting(true);
+    try {
+      await fetch('/api/demo/hiker-advance', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reset: true }),
+      });
+      setHikerNextIdx(Object.fromEntries(TRACKED_HIKERS.map(h => [h.id, 0])));
+    } finally {
+      setResetting(false);
+    }
+  }
 
   async function fire(scenario: Scenario) {
     setFiring(scenario.kind);
@@ -223,7 +259,116 @@ export default function DemoPage() {
           </div>
         </section>
 
-        {/* ── Tracked incidents ──────────────────────────────────────── */}
+        {/* ── Hiker Simulation ───────────────────────────────────────── */}
+        <section style={{ marginTop: '48px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '20px' }}>
+            <p style={{ fontSize: '12px', color: 'rgba(220,232,240,0.4)', letterSpacing: '0.1em', textTransform: 'uppercase', margin: 0 }}>
+              Hiker Simulation — manual checkpoint advancement
+            </p>
+            <button
+              onClick={resetHikers}
+              disabled={resetting}
+              style={{
+                marginLeft: 'auto',
+                padding: '6px 16px',
+                background: resetting ? 'rgba(255,255,255,0.04)' : 'rgba(255,140,66,0.1)',
+                border: `1px solid ${resetting ? 'rgba(220,232,240,0.12)' : 'var(--db-amber, #FF8C42)'}`,
+                color: resetting ? 'rgba(220,232,240,0.35)' : 'var(--db-amber, #FF8C42)',
+                borderRadius: '3px',
+                fontSize: '11px',
+                letterSpacing: '0.1em',
+                textTransform: 'uppercase',
+                cursor: resetting ? 'not-allowed' : 'pointer',
+              }}
+            >
+              {resetting ? 'Resetting…' : '↺ Reset All'}
+            </button>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '12px' }}>
+            {TRACKED_HIKERS.map(hiker => {
+              const nextIdx = hikerNextIdx[hiker.id] ?? 0;
+              const exhausted = nextIdx >= hiker.events.length;
+              const busy = advancingHiker === hiker.id;
+              const borderColor = hiker.events.some((ev, i) => i < nextIdx && ev.status === 'missed')
+                ? '#FF3B3B'
+                : '#00FF88';
+
+              return (
+                <div
+                  key={hiker.id}
+                  style={{
+                    background: 'rgba(255,255,255,0.025)',
+                    border: '1px solid rgba(220,232,240,0.07)',
+                    borderLeft: `3px solid ${borderColor}`,
+                    borderRadius: '4px',
+                    padding: '16px',
+                  }}
+                >
+                  {/* MAC + trail */}
+                  <div style={{ fontFamily: "'Share Tech Mono', monospace", fontSize: '11px', color: 'var(--db-label, #DCE8F0)', fontWeight: 600, letterSpacing: '0.04em', marginBottom: '4px' }}>
+                    {hiker.mac}
+                  </div>
+                  <div style={{ fontSize: '11px', color: 'rgba(220,232,240,0.45)', letterSpacing: '0.05em', marginBottom: '12px' }}>
+                    {hiker.trail}
+                  </div>
+
+                  {/* Sensor pip row */}
+                  <div style={{ display: 'flex', gap: '5px', alignItems: 'center', marginBottom: '14px' }}>
+                    {hiker.sensors.map((sensor, i) => {
+                      const ev = hiker.events.find(e => e.sensorId === sensor.id);
+                      const eventIdx = hiker.events.findIndex(e => e.sensorId === sensor.id);
+                      const fired = eventIdx < nextIdx;
+                      const bg = fired
+                        ? ev?.status === 'missed' ? '#FF3B3B' : '#00FF88'
+                        : '#2a3535';
+                      return (
+                        <div
+                          key={sensor.id}
+                          title={sensor.label}
+                          style={{
+                            width: 10,
+                            height: 10,
+                            borderRadius: '50%',
+                            background: bg,
+                            border: `1px solid ${fired ? bg : 'rgba(176,216,200,0.15)'}`,
+                            flexShrink: 0,
+                            transition: 'background 0.35s',
+                          }}
+                        />
+                      );
+                    })}
+                    <span style={{ fontSize: '10px', color: 'rgba(220,232,240,0.3)', marginLeft: '4px' }}>
+                      {nextIdx}/{hiker.events.length}
+                    </span>
+                  </div>
+
+                  <button
+                    onClick={() => advanceHiker(hiker.id)}
+                    disabled={exhausted || busy}
+                    style={{
+                      padding: '7px 14px',
+                      background: (exhausted || busy) ? 'rgba(255,255,255,0.04)' : 'rgba(0,255,136,0.08)',
+                      border: `1px solid ${(exhausted || busy) ? 'rgba(220,232,240,0.12)' : '#00FF88'}`,
+                      color: (exhausted || busy) ? 'rgba(220,232,240,0.3)' : '#00FF88',
+                      borderRadius: '3px',
+                      fontSize: '11px',
+                      letterSpacing: '0.08em',
+                      textTransform: 'uppercase',
+                      cursor: (exhausted || busy) ? 'not-allowed' : 'pointer',
+                      width: '100%',
+                      transition: 'opacity 0.15s',
+                    }}
+                  >
+                    {busy ? 'Advancing…' : exhausted ? 'All events fired' : 'Next Checkpoint →'}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+
+        {/* ── Tracked incidents ───────────────────────────────────────── */}
         {tracked.length > 0 && (
           <section style={{ marginTop: '48px' }}>
             <p style={{ fontSize: '12px', color: 'rgba(220,232,240,0.4)', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: '16px' }}>

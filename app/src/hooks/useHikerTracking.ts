@@ -57,78 +57,85 @@ function initStates(): HikerState[] {
   }));
 }
 
-const MAX_DURATION_MS = Math.max(...TRACKED_HIKERS.map(h => h.simulationDurationMs));
-const HOLD_MS = 8000;
-const TICK_MS = 500;
-
 export function useHikerTracking(): HikerState[] {
   const [states, setStates] = useState<HikerState[]>(initStates);
-  const elapsedRef = useRef(0);
+  const startTimeRef = useRef<number>(Date.now());
+  const nextEventIdxRef = useRef<Record<string, number>>({});
   const firedRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
-    const tick = () => {
-      elapsedRef.current += TICK_MS;
-      const elapsed = elapsedRef.current;
+    const id = setInterval(async () => {
+      try {
+        const res = await fetch('/api/demo/hiker-advance', { cache: 'no-store' });
+        if (!res.ok) return;
+        const { advances, reset } = await res.json() as { advances: string[]; reset: boolean };
 
-      // Reset simulation cycle
-      if (elapsed > MAX_DURATION_MS + HOLD_MS) {
-        elapsedRef.current = 0;
-        firedRef.current = new Set();
-        setStates(initStates());
-        return;
-      }
+        if (reset) {
+          startTimeRef.current = Date.now();
+          nextEventIdxRef.current = {};
+          firedRef.current = new Set();
+          setStates(initStates());
+          return;
+        }
 
-      setStates(prev => {
-        let changed = false;
-        const next = prev.map(hs => {
-          const unfired = hs.hiker.events.filter(ev => {
-            const key = `${hs.hiker.id}-${ev.sensorId}`;
-            return !firedRef.current.has(key) && elapsed >= ev.offsetMs;
-          });
-          if (unfired.length === 0) return hs;
+        if (advances.length === 0) return;
 
-          changed = true;
-          const newSensorStates = [...hs.sensorStates];
-          const newLogEntries = [...hs.logEntries];
-          let deviated = hs.deviated;
-          let lastKnownLat = hs.lastKnownLat;
-          let lastKnownLon = hs.lastKnownLon;
+        setStates(prev => {
+          let changed = false;
+          const next = prev.map(hs => {
+            const toFire = advances.filter(hikerId => hikerId === hs.hiker.id);
+            if (toFire.length === 0) return hs;
 
-          unfired.forEach(ev => {
-            firedRef.current.add(`${hs.hiker.id}-${ev.sensorId}`);
-            const sIdx = newSensorStates.findIndex(ss => ss.sensor.id === ev.sensorId);
-            if (sIdx < 0) return;
+            const newSensorStates = [...hs.sensorStates];
+            const newLogEntries = [...hs.logEntries];
+            let deviated = hs.deviated;
+            let lastKnownLat = hs.lastKnownLat;
+            let lastKnownLon = hs.lastKnownLon;
 
-            const timeStr = formatTime(elapsed);
-            newSensorStates[sIdx] = {
-              ...newSensorStates[sIdx],
-              status: ev.status,
-              firedAt: timeStr,
-            };
-            newLogEntries.push({
-              time: timeStr,
-              sensorLabel: newSensorStates[sIdx].sensor.label,
-              mac: hs.hiker.mac,
-              status: ev.status,
+            toFire.forEach(() => {
+              const idx = nextEventIdxRef.current[hs.hiker.id] ?? 0;
+              const ev = hs.hiker.events[idx];
+              if (!ev) return;
+
+              changed = true;
+              nextEventIdxRef.current[hs.hiker.id] = idx + 1;
+
+              const key = `${hs.hiker.id}-${ev.sensorId}`;
+              if (firedRef.current.has(key)) return;
+              firedRef.current.add(key);
+
+              const sIdx = newSensorStates.findIndex(ss => ss.sensor.id === ev.sensorId);
+              if (sIdx < 0) return;
+
+              const timeStr = formatTime(Date.now() - startTimeRef.current);
+              newSensorStates[sIdx] = {
+                ...newSensorStates[sIdx],
+                status: ev.status,
+                firedAt: timeStr,
+              };
+              newLogEntries.push({
+                time: timeStr,
+                sensorLabel: newSensorStates[sIdx].sensor.label,
+                mac: hs.hiker.mac,
+                status: ev.status,
+              });
+              if (ev.status === 'missed') deviated = true;
+              if (ev.status === 'detected') {
+                lastKnownLat = newSensorStates[sIdx].sensor.lat;
+                lastKnownLon = newSensorStates[sIdx].sensor.lon;
+              }
             });
-            if (ev.status === 'missed') {
-              deviated = true;
-            }
-            if (ev.status === 'detected') {
-              lastKnownLat = newSensorStates[sIdx].sensor.lat;
-              lastKnownLon = newSensorStates[sIdx].sensor.lon;
-            }
+
+            return { ...hs, sensorStates: newSensorStates, logEntries: newLogEntries, deviated, lastKnownLat, lastKnownLon };
           });
 
-          return { ...hs, sensorStates: newSensorStates, logEntries: newLogEntries, deviated, lastKnownLat, lastKnownLon };
+          return changed ? next : prev;
         });
+      } catch {
+        // ignore fetch errors (API not available yet on first render)
+      }
+    }, 600);
 
-        return changed ? next : prev;
-      });
-    };
-
-    const id = setInterval(tick, TICK_MS);
     return () => clearInterval(id);
   }, []);
 
