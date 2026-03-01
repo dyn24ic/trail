@@ -114,15 +114,22 @@ def train():
     )
 
     # ── Load base model ───────────────────────────────────────────────────
-    log.info("Loading base model (4-bit) …")
+    # Pin this rank to its own single GPU — do NOT use device_map="auto" with
+    # torchrun DDP. "auto" spreads the model across ALL visible GPUs, so every
+    # rank fights over every GPU and causes OOM. {"": local_rank} gives each
+    # rank one exclusive GPU.
+    local_rank = int(os.environ.get("LOCAL_RANK", 0))
+    log.info("Loading base model (4-bit) on GPU %d …", local_rank)
     model = AutoModelForCausalLM.from_pretrained(
         BASE_MODEL,
         quantization_config=bnb_config,
-        device_map="auto",
+        device_map={"": local_rank},
+        torch_dtype=torch.bfloat16,   # explicit dtype — prevents float32 intermediates
+        low_cpu_mem_usage=True,        # load + quantize one tensor at a time (old serial path)
         trust_remote_code=True,
         token=os.getenv("HF_TOKEN"),
     )
-    model = prepare_model_for_kbit_training(model)
+    model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=True)
     model.config.use_cache = False
 
     # ── LoRA adapter ──────────────────────────────────────────────────────
@@ -166,6 +173,7 @@ def train():
         eval_steps=SAVE_STEPS,
         save_total_limit=3,
         load_best_model_at_end=True,
+        gradient_checkpointing=True,
         ddp_find_unused_parameters=False,
         report_to="none",
         dataloader_num_workers=0,

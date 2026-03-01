@@ -95,15 +95,18 @@ def train():
         bnb_4bit_use_double_quant=True,
     )
 
-    log.info("Loading base model (4-bit) …")
+    local_rank = int(os.environ.get("LOCAL_RANK", 0))
+    log.info("Loading base model (4-bit) on GPU %d …", local_rank)
     model = AutoModelForCausalLM.from_pretrained(
         BASE_MODEL,
         quantization_config=bnb_config,
-        device_map="auto",
+        device_map={"": local_rank},
+        torch_dtype=torch.bfloat16,   # explicit dtype — prevents float32 intermediates
+        low_cpu_mem_usage=True,        # load + quantize one tensor at a time (old serial path)
         trust_remote_code=True,
         token=os.getenv("HF_TOKEN"),
     )
-    model = prepare_model_for_kbit_training(model)
+    model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=True)
     model.config.use_cache = False
 
     lora_cfg = LoraConfig(
@@ -140,6 +143,7 @@ def train():
         eval_steps=SAVE_STEPS,
         save_total_limit=3,
         load_best_model_at_end=True,
+        gradient_checkpointing=True,
         ddp_find_unused_parameters=False,
         report_to="none",
         dataloader_num_workers=0,
