@@ -907,12 +907,7 @@ function AiRecommendationSection({
           >
             {loading ? '↻ Generating…' : recommendation ? '↺ Regenerate' : '⚡ Generate'}
           </button>
-        
-        {recommendation && (
-          <span style={{ fontSize: '0.55rem', color: 'var(--db-muted)', letterSpacing: '0.06em' }}>
-            {recommendation.modelUsed}
-          </span>
-        )}
+        </div>
       </div>
 
       {!recommendation && !loading && (
