@@ -1,7 +1,7 @@
-'use client';
+"use client";
 
-import { useEffect, useRef } from 'react';
-import { useIncidents } from '@/lib/incidents/useIncidents';
+import { useEffect, useRef } from "react";
+import { useIncidents } from "@/lib/incidents/useIncidents";
 
 export default function TopBar() {
   const clockRef = useRef<HTMLDivElement>(null);
@@ -18,15 +18,19 @@ export default function TopBar() {
     return () => clearInterval(id);
   }, []);
 
-  const openIncidents = incidents.filter(i => i.status !== 'Closed');
+  const openIncidents = incidents.filter((i) => i.status !== "Closed");
   const hasAlerts = openIncidents.length > 0;
 
   return (
-    <header className={`topbar${hasAlerts ? ' topbar--alerts' : ''}`}>
-      <div className="tb-logo">tr<span className="ai">AI</span>l</div>
+    <header className={`topbar${hasAlerts ? " topbar--alerts" : ""}`}>
+      <div className="tb-logo">
+        <span className="tb-lower">tr</span>
+        <span className="ai">AI</span>
+        <span className="tb-lower">l</span>
+      </div>
       <div className="tb-vsep" />
       <div className="tb-location">
-        <strong>Yosemite NP</strong> · Half Dome Corridor
+        <strong>Yosemite National Park</strong>
       </div>
 
       <div className="tb-spacer" />
@@ -42,7 +46,7 @@ export default function TopBar() {
           <span className="tb-pill-count">0</span>
           <span className="tb-pill-label">Sensors</span>
         </div>
-        <div className={`tb-pill${hasAlerts ? ' tb-pill--alert' : ''}`}>
+        <div className={`tb-pill${hasAlerts ? " tb-pill--alert" : ""}`}>
           <span className="tb-pill-icon">⚠</span>
           <span className="tb-pill-count">{openIncidents.length}</span>
           <span className="tb-pill-label">Incidents</span>
@@ -52,11 +56,13 @@ export default function TopBar() {
       <div className="tb-vsep" />
 
       <div className="tb-status">
-        <span className={`status-dot${hasAlerts ? ' alert' : ''}`} />
-        <span className="tb-status-text">{hasAlerts ? 'ALERT' : 'ACTIVE'}</span>
+        <span className={`status-dot${hasAlerts ? " alert" : ""}`} />
+        <span className="tb-status-text">{hasAlerts ? "ALERT" : "ACTIVE"}</span>
       </div>
 
-      <div className="tb-time" ref={clockRef}>00:00:00</div>
+      <div className="tb-time" ref={clockRef}>
+        00:00:00
+      </div>
     </header>
   );
 }

@@ -326,6 +326,7 @@ export default function MapContainer({ onMapMove }: MapContainerProps) {
           dangerZones={dangerZones}
           hotspotData={hotspots.data}
           onMove={handleMapMove}
+          boxZoomMode={boxZoomMode}
         />
       </div>
 

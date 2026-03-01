@@ -1,48 +1,71 @@
-'use client';
+"use client";
 
-import { useEffect, useState } from 'react';
-import type { Weather } from '@/types/backend';
-import type { DashboardLayout } from '@/hooks/useDashboardLayout';
+import { useEffect, useState } from "react";
+import type { Weather } from "@/types/backend";
+import type { DashboardLayout } from "@/hooks/useDashboardLayout";
 
 const YOSEMITE_LAT = 37.7459;
 const YOSEMITE_LON = -119.5332;
 
 function windDirLabel(deg: number): string {
-  const dirs = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+  const dirs = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
   return dirs[Math.round(deg / 45) % 8];
 }
 
 interface LeftPanelProps {
-  leftTab: DashboardLayout['leftTab'];
-  setLeftTab: (tab: DashboardLayout['leftTab']) => void;
+  leftTab: DashboardLayout["leftTab"];
+  setLeftTab: (tab: DashboardLayout["leftTab"]) => void;
 }
 
-const TABS: { id: DashboardLayout['leftTab']; label: string }[] = [
-  { id: 'fleet',   label: 'FLEET'   },
-  { id: 'sensors', label: 'SENSORS' },
-  { id: 'weather', label: 'WEATHER' },
+const TABS: { id: DashboardLayout["leftTab"]; label: string }[] = [
+  { id: "fleet", label: "FLEET" },
+  { id: "sensors", label: "SENSORS" },
+  { id: "weather", label: "WEATHER" },
 ];
+
+function getOneHourAgo(history: { ts: number; data: Weather }[]): Weather | null {
+  const target = Date.now() - 60 * 60 * 1000;
+  let best: { ts: number; data: Weather } | null = null;
+  for (const h of history) {
+    if (!best || Math.abs(h.ts - target) < Math.abs(best.ts - target)) best = h;
+  }
+  if (!best || Date.now() - best.ts < 10 * 60 * 1000) return null;
+  return best.data;
+}
 
 export default function LeftPanel({ leftTab, setLeftTab }: LeftPanelProps) {
   const [weather, setWeather] = useState<Weather | null>(null);
+  const [weatherHistory, setWeatherHistory] = useState<{ ts: number; data: Weather }[]>([]);
 
   useEffect(() => {
-    fetch(`/api/weather?lat=${YOSEMITE_LAT}&lon=${YOSEMITE_LON}`)
-      .then(r => r.ok ? r.json() : null)
-      .then(data => {
-        if (data?.status === 'ok' && data.weather) setWeather(data.weather);
-      })
-      .catch(() => {});
+    const doFetch = () => {
+      fetch(`/api/weather?lat=${YOSEMITE_LAT}&lon=${YOSEMITE_LON}`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data) => {
+          if (data?.status === "ok" && data.weather) {
+            setWeather(data.weather);
+            const now = Date.now();
+            setWeatherHistory(prev => [
+              ...prev.filter(h => now - h.ts < 90 * 60 * 1000),
+              { ts: now, data: data.weather },
+            ]);
+          }
+        })
+        .catch(() => {});
+    };
+    doFetch();
+    const id = setInterval(doFetch, 5 * 60 * 1000);
+    return () => clearInterval(id);
   }, []);
 
   return (
     <aside className="sidebar sidebar--left">
       {/* Internal tab strip */}
       <div className="sidebar-tab-strip">
-        {TABS.map(t => (
+        {TABS.map((t) => (
           <button
             key={t.id}
-            className={`sidebar-tab${leftTab === t.id ? ' active' : ''}`}
+            className={`sidebar-tab${leftTab === t.id ? " active" : ""}`}
             onClick={() => setLeftTab(t.id)}
           >
             {t.label}
@@ -52,9 +75,9 @@ export default function LeftPanel({ leftTab, setLeftTab }: LeftPanelProps) {
 
       {/* Tab content */}
       <div className="sidebar-content">
-        {leftTab === 'fleet'   && <FleetTab />}
-        {leftTab === 'sensors' && <SensorsTab />}
-        {leftTab === 'weather' && <WeatherTab weather={weather} />}
+        {leftTab === "fleet" && <FleetTab />}
+        {leftTab === "sensors" && <SensorsTab />}
+        {leftTab === "weather" && <WeatherTab weather={weather} prevWeather={getOneHourAgo(weatherHistory)} />}
       </div>
     </aside>
   );
@@ -70,7 +93,15 @@ function FleetTab() {
           <span className="panel-title">Drone Fleet</span>
           <span className="panel-badge">0 Active</span>
         </div>
-        <div style={{ padding: '24px 20px', fontSize: '0.62rem', color: 'var(--db-muted)', textAlign: 'center', lineHeight: 2 }}>
+        <div
+          style={{
+            padding: "24px 20px",
+            fontSize: "0.62rem",
+            color: "var(--db-muted)",
+            textAlign: "center",
+            lineHeight: 2,
+          }}
+        >
           No drones deployed
         </div>
       </div>
@@ -78,16 +109,43 @@ function FleetTab() {
         <div className="panel-heading">
           <span className="panel-title">Mission Readiness</span>
         </div>
-        <div style={{ padding: '14px 20px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-          {([
-            ['Fleet Ready', '0 / 0'],
-            ['Coverage', '—'],
-            ['Avg Battery', '—'],
-            ['Flight Time', '—'],
-          ] as [string, string][]).map(([label, val]) => (
+        <div
+          style={{
+            padding: "14px 20px",
+            display: "grid",
+            gridTemplateColumns: "1fr 1fr",
+            gap: "12px",
+          }}
+        >
+          {(
+            [
+              ["Fleet Ready", "0 / 0"],
+              ["Coverage", "—"],
+              ["Avg Battery", "—"],
+              ["Flight Time", "—"],
+            ] as [string, string][]
+          ).map(([label, val]) => (
             <div key={label}>
-              <div style={{ fontSize: '0.58rem', color: 'var(--db-muted)', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: '3px' }}>{label}</div>
-              <div style={{ fontFamily: "'Share Tech Mono', monospace", fontSize: '0.85rem', color: 'var(--db-text-bright)' }}>{val}</div>
+              <div
+                style={{
+                  fontSize: "0.58rem",
+                  color: "var(--db-muted)",
+                  letterSpacing: "0.1em",
+                  textTransform: "uppercase",
+                  marginBottom: "3px",
+                }}
+              >
+                {label}
+              </div>
+              <div
+                style={{
+                  fontFamily: "'Share Tech Mono', monospace",
+                  fontSize: "0.85rem",
+                  color: "var(--db-text-bright)",
+                }}
+              >
+                {val}
+              </div>
             </div>
           ))}
         </div>
@@ -107,12 +165,14 @@ function SensorsTab() {
           <span className="panel-badge">0 Nodes</span>
         </div>
         <div className="sensor-summary">
-          {([
-            ['Active / Nominal',      0, 'count-ok'],
-            ['Alert / Motion',        0, 'count-alert'],
-            ['Warning / Elevated',    0, 'count-warn'],
-            ['Offline / No Signal',   0, 'count-muted'],
-          ] as [string, number, string][]).map(([label, count, cls]) => (
+          {(
+            [
+              ["Active / Nominal", 0, "count-ok"],
+              ["Alert / Motion", 0, "count-alert"],
+              ["Warning / Elevated", 0, "count-warn"],
+              ["Offline / No Signal", 0, "count-muted"],
+            ] as [string, number, string][]
+          ).map(([label, count, cls]) => (
             <div key={label} className="sensor-row">
               <span className="sensor-label">{label}</span>
               <span className={`sensor-count ${cls}`}>{count}</span>
@@ -135,7 +195,14 @@ function SensorsTab() {
           <span className="panel-title">Emergency Call Boxes</span>
           <span className="panel-badge">0 Installed</span>
         </div>
-        <div style={{ padding: '12px 20px', fontSize: '0.62rem', color: 'var(--db-muted)', textAlign: 'center' }}>
+        <div
+          style={{
+            padding: "12px 20px",
+            fontSize: "0.62rem",
+            color: "var(--db-muted)",
+            textAlign: "center",
+          }}
+        >
           No call boxes registered
         </div>
       </div>
@@ -145,42 +212,126 @@ function SensorsTab() {
 
 // ── Weather Tab ─────────────────────────────────────────────────────────────
 
-function WeatherTab({ weather }: { weather: Weather | null }) {
-  const windKmh     = weather ? Math.round(weather.wind_speed_ms * 3.6) : null;
-  const windDir     = weather ? windDirLabel(weather.wind_direction_deg) : null;
-  const visKm       = weather ? (weather.visibility_m / 1000).toFixed(0) : null;
-  const windWarn    = windKmh != null ? windKmh > 30 : false;
-  const precipWarn  = weather ? (weather.conditions.heavy_rain || weather.conditions.snow || weather.conditions.storm) : false;
+function weatherDelta(
+  current: number | null,
+  prev: number | null,
+  unit: string,
+  decimals = 0
+): string {
+  if (current == null || prev == null) return "—";
+  const diff = current - prev;
+  if (Math.abs(diff) < 0.05) return "—";
+  const sign = diff > 0 ? "▲" : "▼";
+  return `${sign} ${Math.abs(diff).toFixed(decimals)}${unit}`;
+}
+
+function WeatherTab({ weather, prevWeather }: { weather: Weather | null; prevWeather: Weather | null }) {
+  const windKmh = weather ? Math.round(weather.wind_speed_ms * 3.6) : null;
+  const prevWindKmh = prevWeather ? Math.round(prevWeather.wind_speed_ms * 3.6) : null;
+  const windDir = weather ? windDirLabel(weather.wind_direction_deg) : null;
+  const visKm = weather ? weather.visibility_m / 1000 : null;
+  const prevVisKm = prevWeather ? prevWeather.visibility_m / 1000 : null;
+  const windWarn = windKmh != null ? windKmh > 30 : false;
+  const precipWarn = weather
+    ? weather.conditions.heavy_rain ||
+      weather.conditions.snow ||
+      weather.conditions.storm
+    : false;
 
   const now = new Date();
   const sunsetTotalMin = 18 * 60 + 10;
-  const nowTotalMin    = now.getHours() * 60 + now.getMinutes();
-  const remainMin      = Math.max(0, sunsetTotalMin - nowTotalMin);
-  const daylightDisplay = remainMin > 0 ? `${Math.floor(remainMin / 60)}h ${remainMin % 60}m` : 'After sunset';
+  const nowTotalMin = now.getHours() * 60 + now.getMinutes();
+  const remainMin = Math.max(0, sunsetTotalMin - nowTotalMin);
+  const daylightDisplay =
+    remainMin > 0
+      ? `${Math.floor(remainMin / 60)}h ${remainMin % 60}m`
+      : "After sunset";
 
-  const cells: [string, string, string, boolean][] = [
-    ['Temperature',        weather ? `${Math.round(weather.temperature_c)}°C` : '—',      weather ? `Feels like ${Math.round(weather.feels_like_c)}°C · ${weather.description}` : 'Fetching…',                   false],
-    ['Wind Speed',         windKmh != null ? `${windKmh} km/h` : '—',                     weather ? `${windDir} · ${weather.humidity_pct}% humidity` : 'Fetching…',                                               windWarn],
-    ['Visibility',         visKm != null ? `${visKm} km` : '—',                           weather ? weather.description : 'Fetching…',                                                                             false],
-    ['Precipitation',      weather ? `${weather.precipitation_mm_1h.toFixed(1)} mm/h` : '—', weather ? (weather.conditions.snow ? 'Snow conditions' : weather.conditions.heavy_rain ? 'Heavy rain' : 'Clear') : 'Fetching…', precipWarn],
-    ['Daylight Remaining', daylightDisplay,                                                'Sunset ~18:10 local',                                                                                                    false],
+  const cells: [string, string, string, boolean, string][] = [
+    [
+      "Temperature",
+      weather ? `${Math.round(weather.temperature_c)}°C` : "—",
+      weather
+        ? `Feels like ${Math.round(weather.feels_like_c)}°C · ${weather.description}`
+        : "Fetching…",
+      false,
+      weatherDelta(weather?.temperature_c ?? null, prevWeather?.temperature_c ?? null, "°C", 1),
+    ],
+    [
+      "Wind Speed",
+      windKmh != null ? `${windKmh} km/h` : "—",
+      weather ? `${windDir} · ${weather.humidity_pct}% humidity` : "Fetching…",
+      windWarn,
+      weatherDelta(windKmh, prevWindKmh, " km/h"),
+    ],
+    [
+      "Visibility",
+      visKm != null ? `${visKm.toFixed(0)} km` : "—",
+      weather ? weather.description : "Fetching…",
+      false,
+      weatherDelta(visKm, prevVisKm, " km", 1),
+    ],
+    [
+      "Precipitation",
+      weather ? `${weather.precipitation_mm_1h.toFixed(1)} mm/h` : "—",
+      weather
+        ? weather.conditions.snow
+          ? "Snow conditions"
+          : weather.conditions.heavy_rain
+            ? "Heavy rain"
+            : "Clear"
+        : "Fetching…",
+      precipWarn,
+      weatherDelta(
+        weather?.precipitation_mm_1h ?? null,
+        prevWeather?.precipitation_mm_1h ?? null,
+        " mm/h",
+        1
+      ),
+    ],
+    ["Daylight Remaining", daylightDisplay, "Sunset ~18:10 local", false, ""],
   ];
 
   return (
-    <div className="panel-section" style={{ borderBottom: 'none' }}>
-      <div className="panel-heading">
-        <span className="panel-title">Environmental Conditions</span>
-        {weather
-          ? <span className="panel-badge" style={{ color: 'var(--db-green)' }}>● LIVE</span>
-          : <span className="panel-badge" style={{ color: 'var(--db-muted)' }}>Loading…</span>
+    <div className="panel-section" style={{ borderBottom: "none" }}>
+      <style>{`
+        .w-delta {
+          font-size: 0.55rem;
+          letter-spacing: 0.08em;
+          margin-top: 2px;
+          opacity: 0.75;
+          font-family: 'Share Tech Mono', monospace;
+          color: var(--db-muted);
         }
+        .w-delta:not(:empty)::after { content: " vs 1h ago"; }
+      `}</style>
+      <div
+        className="panel-heading"
+        style={{
+          display: "flex",
+          flexDirection: "row",
+          alignItems: "center",
+          justifyContent: "space-between",
+        }}
+      >
+        <span className="panel-title">Environmental Conditions</span>
+        {weather ? (
+          <span className="panel-badge" style={{ color: "var(--db-green)" }}>
+            ● LIVE
+          </span>
+        ) : (
+          <span className="panel-badge" style={{ color: "var(--db-muted)" }}>
+            Loading…
+          </span>
+        )}
       </div>
       <div className="weather-grid">
-        {cells.map(([label, value, sub, warn]) => (
+        {cells.map(([label, value, sub, warn, delta]) => (
           <div key={label} className="weather-cell">
             <div className="w-label">{label}</div>
-            <div className={`w-value${warn ? ' warn' : ''}`}>{value}</div>
+            <div className={`w-value${warn ? " warn" : ""}`}>{value}</div>
             <div className="w-sub">{sub}</div>
+            {delta !== "" && <div className="w-delta">{delta}</div>}
           </div>
         ))}
       </div>

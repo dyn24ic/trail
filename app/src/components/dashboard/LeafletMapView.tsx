@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Map as LeafletMap, Marker, Polyline, CircleMarker } from 'leaflet';
 import type { HybridRoute, LatLon } from '@/types/backend';
+import { YOSEMITE_BOUNDARY, WORLD_RING } from '@/data/yosemiteBoundary';
 
 export type RoutingMode = 'set-ambulance' | 'set-victim' | 'view';
 
@@ -132,6 +133,50 @@ export default function LeafletMapView({
       }).addTo(map);
 
       L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+      // ── Yosemite boundary fog of war ─────────────────────────────────────
+      // evenodd fill rule: inside world ring (1 crossing) = filled;
+      // inside Yosemite (2 crossings) = unfilled = map shows through.
+      L.geoJSON(
+        {
+          type: 'Feature',
+          properties: {},
+          geometry: {
+            type: 'Polygon',
+            coordinates: [WORLD_RING, YOSEMITE_BOUNDARY],
+          },
+        } as GeoJSON.Feature,
+        {
+          style: {
+            fillColor: '#020608',
+            fillOpacity: 0.72,
+            stroke: false,
+            fillRule: 'evenodd',
+          },
+          interactive: false,
+        }
+      ).addTo(map);
+
+      // Park boundary dashed line
+      L.geoJSON(
+        {
+          type: 'Feature',
+          properties: {},
+          geometry: {
+            type: 'LineString',
+            coordinates: YOSEMITE_BOUNDARY,
+          },
+        } as GeoJSON.Feature,
+        {
+          style: {
+            color: '#00FF88',
+            weight: 2,
+            opacity: 0.85,
+            dashArray: '8 4',
+          },
+          interactive: false,
+        }
+      ).addTo(map);
 
       // Single permanent click handler reads current mode from ref
       map.on('click', (e) => {
