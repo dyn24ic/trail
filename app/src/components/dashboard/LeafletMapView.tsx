@@ -1,9 +1,12 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import type { Map as LeafletMap, Marker, Polyline, CircleMarker } from 'leaflet';
-import type { HybridRoute, LatLon } from '@/types/backend';
+import type { Map as LeafletMap, Marker, Polyline, CircleMarker, Polygon, TileLayer } from 'leaflet';
+import type { HybridRoute, LatLon, DangerZone } from '@/types/backend';
+import type { HikeNode } from '@/lib/hikeRoute';
 import { YOSEMITE_BOUNDARY, WORLD_RING } from '@/data/yosemiteBoundary';
+import { TRAIL_SEGMENTS } from '@/data/trailSegments';
+import type { BleScannerSuggestion, DroneMarker, IncidentMarker } from '@/types/markers';
 
 export type RoutingMode = 'set-ambulance' | 'set-victim' | 'view';
 
@@ -16,6 +19,21 @@ interface Props {
   onVictimSet: (pos: LatLon) => void;
   initialView?: { lat: number; lon: number; zoom: number };
   onMove?: (lat: number, lon: number, zoom: number) => void;
+  hikeMode?: boolean;
+  hikeWaypoints?: HikeNode[];
+  onHikeNodeAdded?: (pos: LatLon) => void;
+  bleScanners?: BleScannerSuggestion[];
+  droneData?: DroneMarker[];
+  incidentData?: IncidentMarker[];
+  dangerZones?: DangerZone[];
+  layers?: {
+    sensors: boolean;
+    drones: boolean;
+    incidents: boolean;
+    zones: boolean;
+    hotspots: boolean;
+    osm: boolean;
+  };
 }
 
 // ── Elevation/hazard colour helper ─────────────────────────────────────────
@@ -80,18 +98,41 @@ export default function LeafletMapView({
   onVictimSet,
   initialView,
   onMove,
+  hikeMode,
+  hikeWaypoints,
+  onHikeNodeAdded,
+  bleScanners = [],
+  droneData = [],
+  incidentData = [],
+  dangerZones = [],
+  layers,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<LeafletMap | null>(null);
   const [mapReady, setMapReady] = useState(false);
 
-  // Marker refs
+  // Routing marker refs
   const ambulanceMarkerRef = useRef<Marker | null>(null);
   const victimMarkerRef = useRef<Marker | null>(null);
   const stopMarkerRef = useRef<Marker | null>(null);
   const victimEndMarkerRef = useRef<Marker | null>(null);
   const roadPolyRef = useRef<Polyline | null>(null);
   const mountainPolylinesRef = useRef<(Polyline | CircleMarker)[]>([]);
+
+  // Hike refs
+  const hikeModeRef = useRef(hikeMode ?? false);
+  const onHikeNodeAddedRef = useRef(onHikeNodeAdded);
+  const hikeMarkersRef = useRef<CircleMarker[]>([]);
+  const hikePolyRef = useRef<Polyline | null>(null);
+
+  // BLE scanner refs
+  const bleMarkersRef = useRef<CircleMarker[]>([]);
+
+  // Drone / incident / zone / satellite refs
+  const droneLeafletRefs    = useRef<Marker[]>([]);
+  const incidentLeafletRefs = useRef<CircleMarker[]>([]);
+  const zoneLeafletRefs     = useRef<Polygon[]>([]);
+  const satelliteTileRef    = useRef<TileLayer | null>(null);
 
   // Keep mode + callbacks in refs so the permanent click handler always sees latest values
   const modeRef = useRef(mode);
@@ -103,17 +144,21 @@ export default function LeafletMapView({
   useEffect(() => { modeRef.current = mode; }, [mode]);
   useEffect(() => { onAmbulanceSetRef.current = onAmbulanceSet; }, [onAmbulanceSet]);
   useEffect(() => { onVictimSetRef.current = onVictimSet; }, [onVictimSet]);
+  useEffect(() => { hikeModeRef.current = hikeMode ?? false; }, [hikeMode]);
+  useEffect(() => { onHikeNodeAddedRef.current = onHikeNodeAdded; }, [onHikeNodeAdded]);
 
-  // ── Cursor update (safe to run whether map is ready or not) ──────────────
+  // ── Cursor update ─────────────────────────────────────────────────────────
   useEffect(() => {
-    mapRef.current?.getContainer()?.style.setProperty('cursor', mode !== 'view' ? 'crosshair' : '');
-  }, [mode, mapReady]);
+    mapRef.current?.getContainer()?.style.setProperty(
+      'cursor',
+      (mode !== 'view' || hikeMode) ? 'crosshair' : ''
+    );
+  }, [mode, hikeMode, mapReady]);
 
   // ── Initialise map once ──────────────────────────────────────────────────
   useEffect(() => {
     if (mapRef.current || !containerRef.current) return;
 
-    // Inject Leaflet CSS via <link> – @import inside <style> is unreliable in React
     if (!document.getElementById('leaflet-css-link')) {
       const link = document.createElement('link');
       link.id = 'leaflet-css-link';
@@ -136,18 +181,22 @@ export default function LeafletMapView({
         zoomControl: false,
       });
 
-      // OpenTopoMap – terrain colours, rivers, contours; free, no API key
+      // OpenTopoMap base layer
       L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
         attribution:
           'Map data: &copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> contributors, SRTM | Style: &copy; <a href="https://opentopomap.org">OpenTopoMap</a>',
         maxZoom: 17,
       }).addTo(map);
 
+      // Create satellite tile layer (not added yet — toggled via layers.osm)
+      satelliteTileRef.current = L.tileLayer(
+        'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+        { attribution: 'Tiles &copy; Esri', maxZoom: 19, opacity: 0.95 }
+      );
+
       L.control.zoom({ position: 'bottomright' }).addTo(map);
 
-      // ── Yosemite boundary fog of war ─────────────────────────────────────
-      // evenodd fill rule: inside world ring (1 crossing) = filled;
-      // inside Yosemite (2 crossings) = unfilled = map shows through.
+      // Yosemite boundary fog of war
       L.geoJSON(
         {
           type: 'Feature',
@@ -189,9 +238,29 @@ export default function LeafletMapView({
         }
       ).addTo(map);
 
-      // Single permanent click handler reads current mode from ref
+      // ── Trail traffic overlay ────────────────────────────────────────────
+      const trafficColor = (t: string) =>
+        t === 'high' ? '#ef4444' : t === 'medium' ? '#f59e0b' : '#22c55e';
+
+      TRAIL_SEGMENTS.forEach(seg => {
+        const latlngs = seg.coords.map(([lon, lat]) => [lat, lon] as [number, number]);
+        L.polyline(latlngs, {
+          color: trafficColor(seg.traffic),
+          weight: 4,
+          opacity: 0.85,
+          interactive: true,
+        })
+          .bindTooltip(seg.name, { sticky: true })
+          .addTo(map);
+      });
+
+      // Permanent click handler
       map.on('click', (e) => {
         const pos: LatLon = { lat: e.latlng.lat, lon: e.latlng.lng };
+        if (hikeModeRef.current) {
+          onHikeNodeAddedRef.current?.(pos);
+          return;
+        }
         if (modeRef.current === 'set-ambulance') onAmbulanceSetRef.current(pos);
         else if (modeRef.current === 'set-victim') onVictimSetRef.current(pos);
       });
@@ -208,12 +277,13 @@ export default function LeafletMapView({
     return () => {
       mapRef.current?.remove();
       mapRef.current = null;
+      satelliteTileRef.current = null;
       setMapReady(false);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ── Ambulance marker ─────────────────────────────────────────────────────
+  // ── Ambulance marker ──────────────────────────────────────────────────────
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
@@ -231,7 +301,7 @@ export default function LeafletMapView({
     });
   }, [ambulancePos, mapReady]);
 
-  // ── Victim marker ────────────────────────────────────────────────────────
+  // ── Victim marker ─────────────────────────────────────────────────────────
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
@@ -249,13 +319,12 @@ export default function LeafletMapView({
     });
   }, [victimPos, mapReady]);
 
-  // ── Route display ────────────────────────────────────────────────────────
+  // ── Route display ─────────────────────────────────────────────────────────
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
 
     import('leaflet').then((L) => {
-      // Clear previous route layers
       roadPolyRef.current?.remove();
       roadPolyRef.current = null;
       mountainPolylinesRef.current.forEach((p) => p.remove());
@@ -269,7 +338,6 @@ export default function LeafletMapView({
 
       const allPoints: [number, number][] = [];
 
-      // ── Road segment – cyan polyline (ambulance → stop) ──────────────
       if (hybridRoute.roadPath.length > 1) {
         const roadCoords = hybridRoute.roadPath.map(
           (p) => [p.lat, p.lon] as [number, number]
@@ -285,7 +353,6 @@ export default function LeafletMapView({
           .addTo(map);
       }
 
-      // ── Mountain segment – per-segment colour by hazard (stop → victim) ──
       const waypoints = hybridRoute.mountainRoute.route.waypoints;
       if (waypoints.length > 1) {
         for (let i = 0; i < waypoints.length - 1; i++) {
@@ -293,10 +360,7 @@ export default function LeafletMapView({
           const wn = waypoints[i + 1];
           const colour = hazardColour(wp.hazard ?? 0);
           const seg = L.polyline(
-            [
-              [wp.lat, wp.lon],
-              [wn.lat, wn.lon],
-            ],
+            [[wp.lat, wp.lon], [wn.lat, wn.lon]],
             { color: colour, weight: 6, opacity: 0.95 }
           ).addTo(map);
           mountainPolylinesRef.current.push(seg);
@@ -306,19 +370,15 @@ export default function LeafletMapView({
         allPoints.push([lastWp.lat, lastWp.lon]);
       }
 
-      // ── Stop point marker (ambulance dismount) ───────────────────────
       const sp = hybridRoute.stopPoint;
       allPoints.push([sp.lat, sp.lon]);
       stopMarkerRef.current = L.marker([sp.lat, sp.lon], {
         icon: stopIcon(L),
         zIndexOffset: 1000,
       })
-        .bindTooltip('🛑 Ambulance stops – medics walk from here', {
-          permanent: false,
-        })
+        .bindTooltip('🛑 Ambulance stops – medics walk from here', { permanent: false })
         .addTo(map);
 
-      // ── Victim endpoint marker (end of mountain route) ────────────────
       const lastWp = waypoints[waypoints.length - 1];
       if (lastWp) {
         allPoints.push([lastWp.lat, lastWp.lon]);
@@ -326,30 +386,264 @@ export default function LeafletMapView({
           icon: victimEndpointIcon(L),
           zIndexOffset: 1200,
         })
-          .bindTooltip('🎯 Victim – end of mountain route', {
-            permanent: false,
-          })
+          .bindTooltip('🎯 Victim – end of mountain route', { permanent: false })
           .addTo(map);
       }
 
-      // ── Fit map to show the full route ───────────────────────────────
       if (allPoints.length > 1) {
         map.fitBounds(L.latLngBounds(allPoints), { padding: [50, 50] });
       }
     });
   }, [hybridRoute, mapReady]);
 
+  // ── Hike route drawing ────────────────────────────────────────────────────
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    import('leaflet').then((L) => {
+      hikeMarkersRef.current.forEach(m => m.remove());
+      hikeMarkersRef.current = [];
+      hikePolyRef.current?.remove();
+      hikePolyRef.current = null;
+
+      const nodes = hikeWaypoints ?? [];
+      if (nodes.length === 0) return;
+
+      if (nodes.length >= 2) {
+        const coords = nodes.map(n => [n.lat, n.lon] as [number, number]);
+        hikePolyRef.current = L.polyline(coords, {
+          color: '#00ffc8',
+          weight: 3,
+          dashArray: '8 5',
+          opacity: 0.9,
+        }).addTo(map);
+      }
+
+      nodes.forEach((node, i) => {
+        const isStart = i === 0;
+        const isEnd   = i === nodes.length - 1;
+        const fillColor = isStart ? '#22c55e' : isEnd ? '#ef4444' : '#00ffc8';
+        const radius    = (isStart || isEnd) ? 9 : 6;
+
+        const elevLine = node.elevation_m !== null
+          ? `<br/>${node.elevation_m} m`
+          : '<br/>pending…';
+
+        const label = isStart
+          ? `▶ Start${elevLine}`
+          : isEnd
+          ? `■ End${elevLine}`
+          : `● Node ${i + 1}${elevLine}`;
+
+        const marker = L.circleMarker([node.lat, node.lon], {
+          radius,
+          fillColor,
+          color: '#fff',
+          weight: 2,
+          fillOpacity: 1,
+        })
+          .bindTooltip(label, { permanent: false })
+          .addTo(map);
+
+        hikeMarkersRef.current.push(marker);
+      });
+    });
+  }, [hikeWaypoints, mapReady]);
+
+  // ── BLE scanner markers ───────────────────────────────────────────────────
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    import('leaflet').then((L) => {
+      bleMarkersRef.current.forEach(m => m.remove());
+      bleMarkersRef.current = [];
+
+      bleScanners.forEach(scanner => {
+        const isTrailhead   = scanner.type === 'trailhead';
+        const isDestination = scanner.type === 'destination';
+        const color  = isTrailhead ? '#a855f7' : isDestination ? '#f97316' : '#7c3aed';
+        const radius = isTrailhead ? 10 : isDestination ? 6 : 7;
+
+        const marker = L.circleMarker([scanner.lat, scanner.lon], {
+          radius,
+          fillColor: color,
+          color: '#ffffff',
+          weight: 1.5,
+          fillOpacity: 0.95,
+        })
+          .bindTooltip(`${scanner.name}\n${scanner.rationale}`, { permanent: false })
+          .addTo(map);
+
+        bleMarkersRef.current.push(marker);
+      });
+    });
+  }, [bleScanners, mapReady]);
+
+  // ── Drone markers ─────────────────────────────────────────────────────────
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
+
+    import('leaflet').then((L) => {
+      droneLeafletRefs.current.forEach(m => m.remove());
+      droneLeafletRefs.current = [];
+
+      const show = layers?.drones ?? true;
+
+      droneData.forEach(drone => {
+        // Hub — amber rotated diamond
+        const hubIcon = L.divIcon({
+          className: '',
+          html: `<div style="width:10px;height:10px;background:rgba(255,193,7,0.5);border:1.5px solid #FFC107;transform:rotate(45deg);"></div>`,
+          iconSize: [10, 10],
+          iconAnchor: [5, 5],
+        });
+        const hubMarker = L.marker([drone.hubLat, drone.hubLon], { icon: hubIcon })
+          .bindTooltip(`Hub: ${drone.label}`, { permanent: false })
+          .addTo(map);
+        hubMarker.setOpacity(show ? 1 : 0);
+        droneLeafletRefs.current.push(hubMarker);
+
+        // Drone — amber circle + ✈ + altitude badge
+        const droneIcon = L.divIcon({
+          className: '',
+          html: `<div style="position:relative;width:24px;height:24px;">
+            <div style="position:absolute;inset:0;border-radius:50%;background:rgba(255,193,7,0.25);border:1.5px solid #FFC107;"></div>
+            <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:12px;color:#FFC107;">✈</div>
+            <div style="position:absolute;top:-13px;left:50%;transform:translateX(-50%);font-size:8px;color:#FFC107;white-space:nowrap;font-family:monospace;background:rgba(4,11,11,0.85);padding:1px 3px;border-radius:2px;">+${drone.alt}m</div>
+          </div>`,
+          iconSize: [24, 24],
+          iconAnchor: [12, 12],
+        });
+        const droneMarker = L.marker([drone.lat, drone.lon], { icon: droneIcon })
+          .bindTooltip(`${drone.id} — ${drone.label}\nAlt: ${drone.alt}m AGL`, { permanent: false })
+          .addTo(map);
+        droneMarker.setOpacity(show ? 1 : 0);
+        droneLeafletRefs.current.push(droneMarker);
+      });
+    });
+  }, [droneData, mapReady]);
+
+  // ── Drone visibility toggle ───────────────────────────────────────────────
+  useEffect(() => {
+    const show = layers?.drones ?? true;
+    droneLeafletRefs.current.forEach(m => m.setOpacity(show ? 1 : 0));
+  }, [layers?.drones]);
+
+  // ── Incident markers ──────────────────────────────────────────────────────
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
+
+    import('leaflet').then((L) => {
+      incidentLeafletRefs.current.forEach(m => m.remove());
+      incidentLeafletRefs.current = [];
+
+      const show = layers?.incidents ?? true;
+
+      incidentData.forEach(inc => {
+        const isCritical = inc.severity === 'critical';
+        const radius     = isCritical ? 12 : 9;
+        const color      = isCritical ? '#FF3B3B' : '#FFC107';
+
+        const marker = L.circleMarker([inc.lat, inc.lon], {
+          radius,
+          fillColor: color,
+          color: color,
+          weight: 2,
+          fillOpacity: show ? 0.5 : 0,
+          opacity: show ? 0.9 : 0,
+        })
+          .bindTooltip(inc.label ?? inc.id, { permanent: false })
+          .addTo(map);
+
+        incidentLeafletRefs.current.push(marker);
+      });
+    });
+  }, [incidentData, mapReady]);
+
+  // ── Incident visibility toggle ────────────────────────────────────────────
+  useEffect(() => {
+    const show = layers?.incidents ?? true;
+    incidentLeafletRefs.current.forEach(m => {
+      m.setStyle({ fillOpacity: show ? 0.5 : 0, opacity: show ? 0.9 : 0 });
+    });
+  }, [layers?.incidents]);
+
+  // ── Zone polygons ─────────────────────────────────────────────────────────
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady || !dangerZones.length) return;
+
+    import('leaflet').then((L) => {
+      zoneLeafletRefs.current.forEach(p => p.remove());
+      zoneLeafletRefs.current = [];
+
+      const show = layers?.zones ?? true;
+
+      dangerZones.forEach(zone => {
+        const sw = zone.bounds.sw;
+        const ne = zone.bounds.ne;
+        const corners: [number, number][] = [
+          [sw.lat, sw.lon],
+          [sw.lat, ne.lon],
+          [ne.lat, ne.lon],
+          [ne.lat, sw.lon],
+        ];
+
+        let fillColor: string;
+        if (zone.hazard_score > 0.66)      fillColor = '#FF3B3B';
+        else if (zone.hazard_score > 0.33) fillColor = '#FF8C42';
+        else                               fillColor = '#4A9FD4';
+
+        const poly = L.polygon(corners, {
+          fillColor,
+          fillOpacity: show ? 0.35 : 0,
+          color: fillColor,
+          weight: show ? 1 : 0,
+          opacity: show ? 0.6 : 0,
+          interactive: false,
+        }).addTo(map);
+
+        zoneLeafletRefs.current.push(poly);
+      });
+    });
+  }, [dangerZones, mapReady]);
+
+  // ── Zone visibility toggle ────────────────────────────────────────────────
+  useEffect(() => {
+    const show = layers?.zones ?? true;
+    zoneLeafletRefs.current.forEach(poly => {
+      poly.setStyle({
+        fillOpacity: show ? 0.35 : 0,
+        weight: show ? 1 : 0,
+        opacity: show ? 0.6 : 0,
+      });
+    });
+  }, [layers?.zones]);
+
+  // ── Satellite tile toggle ─────────────────────────────────────────────────
+  useEffect(() => {
+    const map = mapRef.current;
+    const tile = satelliteTileRef.current;
+    if (!map || !tile) return;
+    if (layers?.osm) tile.addTo(map);
+    else tile.remove();
+  }, [layers?.osm, mapReady]);
+
   // ── Mode cursor hint ──────────────────────────────────────────────────────
-  const hintText =
-    mode === 'set-ambulance'
-      ? 'Click map to place ambulance'
-      : mode === 'set-victim'
-      ? 'Click map to place victim'
-      : null;
+  const hintText = hikeMode
+    ? 'Click map to add hike waypoint'
+    : mode === 'set-ambulance'
+    ? 'Click map to place ambulance'
+    : mode === 'set-victim'
+    ? 'Click map to place victim'
+    : null;
 
   return (
     <div style={{ position: 'relative', width: '100%', height: '100%' }}>
-      {/* Tooltip style overrides */}
       <style>{`
         .leaflet-tooltip {
           background: rgba(10,30,20,0.92) !important;

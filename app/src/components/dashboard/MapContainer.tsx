@@ -2,14 +2,22 @@
 
 import { useState, useEffect, useRef } from 'react';
 import dynamic from 'next/dynamic';
+import type mapboxgl from 'mapbox-gl';
 import { usePredictHotspots } from '@/lib/hotspots/usePredictHotspots';
 import { useIncidents } from '@/lib/incidents/useIncidents';
 import { YOSEMITE_BBOX } from '@/data/trailBbox';
-import type { DangerZone, IncidentSummary } from '@/types/backend';
+import type { DangerZone, IncidentSummary, LatLon } from '@/types/backend';
 import type { IncidentMarker } from '@/types/markers';
+import { droneData } from '@/data/drones';
+import { incidentData as staticIncidentData } from '@/data/incidents';
 import { useHybridRoute } from '@/hooks/useHybridRoute';
 import RouteAnalysisPanel from './RouteAnalysisPanel';
 import type { RoutingMode } from './LeafletMapView';
+import { HikeNode, HikeStats, HikeRoute, YOSEMITE_EXAMPLE_ROUTE } from '@/lib/hikeRoute';
+import HikeRoutePanel from './HikeRoutePanel';
+import { useSensorSuggestions } from '@/hooks/useSensorSuggestions';
+import DroneFlightPanel from './DroneFlightPanel';
+import type { DroneSearchUpdate } from '@/data/dronePath';
 
 // ── Coordinate utilities ───────────────────────────────────────────────────
 
@@ -137,7 +145,6 @@ export default function MapContainer({ onMapMove }: MapContainerProps) {
     drones: true,
     incidents: true,
     zones: true,
-    landmarks: true,
     hotspots: true,
     osm: false,
   });
@@ -148,8 +155,16 @@ export default function MapContainer({ onMapMove }: MapContainerProps) {
   const [routingMode, setRoutingMode] = useState<RoutingMode>('view');
   const [severity, setSeverity] = useState(3);
   const [showAnalysis, setShowAnalysis] = useState(false);
+  const [hikeMode, setHikeMode] = useState(false);
+  const [hikeWaypoints, setHikeWaypoints] = useState<HikeNode[]>([]);
+  const [hikeStats, setHikeStats] = useState<HikeStats | null>(null);
+  const [droneSearchActive, setDroneSearchActive] = useState(false);
+  const [droneUpdate, setDroneUpdate] = useState<DroneSearchUpdate | null>(null);
+  const mapboxMapRef = useRef<mapboxgl.Map | null>(null);
+  const hikeNodeIdxRef = useRef(0);
 
   const hotspots = usePredictHotspots(YOSEMITE_BBOX);
+  const { status: scanStatus, scanners, load: loadScanners, clear: clearScanners } = useSensorSuggestions();
   const {
     ambulancePos,
     victimPos,
@@ -162,9 +177,10 @@ export default function MapContainer({ onMapMove }: MapContainerProps) {
   } = useHybridRoute();
 
   const { incidents } = useIncidents();
-  const incidentMarkers: IncidentMarker[] = incidents
-    .map(toIncidentMarker)
-    .filter((m): m is IncidentMarker => m !== null);
+  const allIncidentMarkers: IncidentMarker[] = [
+    ...staticIncidentData,
+    ...incidents.map(toIncidentMarker).filter((m): m is IncidentMarker => m !== null),
+  ];
 
   const toggle = (name: keyof typeof layers) => {
     setLayers(prev => ({ ...prev, [name]: !prev[name] }));
@@ -186,6 +202,67 @@ export default function MapContainer({ onMapMove }: MapContainerProps) {
       .catch(() => {});
   }, []);
 
+  // Recompute hike stats when waypoints change
+  useEffect(() => {
+    setHikeStats(hikeWaypoints.length >= 2 ? HikeRoute.computeStats(hikeWaypoints) : null);
+  }, [hikeWaypoints]);
+
+  function handleHikeNodeAdded(pos: LatLon) {
+    const idx = hikeNodeIdxRef.current++;
+    setHikeWaypoints(prev => [...prev, { lat: pos.lat, lon: pos.lon, elevation_m: null }]);
+
+    const map = mapboxMapRef.current;
+    if (!map) return;
+
+    const doQuery = () => {
+      const elev = map.queryTerrainElevation([pos.lon, pos.lat], { exaggerated: false });
+      if (elev != null) {
+        map.off('idle', doQuery);
+        setHikeWaypoints(cur => {
+          if (cur[idx]?.lat !== pos.lat || cur[idx]?.lon !== pos.lon) return cur;
+          const copy = [...cur];
+          copy[idx] = { ...copy[idx], elevation_m: Math.round(elev) };
+          return copy;
+        });
+      }
+    };
+
+    if (map.areTilesLoaded()) doQuery();
+    else map.on('idle', doQuery);
+  }
+
+  function loadExampleRoute() {
+    hikeNodeIdxRef.current = YOSEMITE_EXAMPLE_ROUTE.length;
+    setHikeWaypoints([...YOSEMITE_EXAMPLE_ROUTE]);
+    setMapboxFlyTo({ lat: 37.7323, lon: -119.5582, zoom: 13, v: Date.now() });
+
+    const map = mapboxMapRef.current;
+    if (!map) return;
+
+    // Try to override hardcoded elevations with real DEM data
+    const queryAll = () => {
+      YOSEMITE_EXAMPLE_ROUTE.forEach((node, i) => {
+        const elev = map.queryTerrainElevation([node.lon, node.lat], { exaggerated: false });
+        if (elev != null) {
+          setHikeWaypoints(cur => {
+            const copy = [...cur];
+            if (copy[i]) copy[i] = { ...copy[i], elevation_m: Math.round(elev) };
+            return copy;
+          });
+        }
+      });
+    };
+
+    if (map.areTilesLoaded()) queryAll();
+    else map.once('idle', queryAll);
+  }
+
+  function clearHikeRoute() {
+    setHikeWaypoints([]);
+    setHikeStats(null);
+    hikeNodeIdxRef.current = 0;
+  }
+
   function handleMapboxMove(lat: number, lon: number, zoom: number) {
     setSharedView({ lat, lon, zoom });
     onMapMove?.(lat, lon);
@@ -201,7 +278,6 @@ export default function MapContainer({ onMapMove }: MapContainerProps) {
     ['drones',    'Drones',    'var(--db-amber)'],
     ['incidents', 'Incidents', 'var(--db-red)'],
     ['zones',     'Zones',     'var(--db-blue)'],
-    ['landmarks', 'Landmarks', '#FFD700'],
     ['osm',       'Satellite', '#88BBFF'],
   ];
 
@@ -231,6 +307,7 @@ export default function MapContainer({ onMapMove }: MapContainerProps) {
           setLayers(prev => ({ ...prev, osm: false }));
         }}>3D</button>
         <button className={`tb-view-btn${viewMode === '2d' ? ' on' : ''}`} onClick={() => {
+          setHikeMode(false);
           setViewMode('2d');
           setLayers(prev => ({ ...prev, osm: true }));
         }}>2D</button>
@@ -258,6 +335,7 @@ export default function MapContainer({ onMapMove }: MapContainerProps) {
         <button
           style={routingMode === 'set-ambulance' ? tbBtnOn : tbBtnBase}
           onClick={() => {
+            setHikeMode(false);
             setRoutingMode(prev => prev === 'set-ambulance' ? 'view' : 'set-ambulance');
             if (viewMode !== '2d') setViewMode('2d');
           }}
@@ -268,6 +346,7 @@ export default function MapContainer({ onMapMove }: MapContainerProps) {
         <button
           style={routingMode === 'set-victim' ? tbBtnOn : tbBtnBase}
           onClick={() => {
+            setHikeMode(false);
             setRoutingMode(prev => prev === 'set-victim' ? 'view' : 'set-victim');
             if (viewMode !== '2d') setViewMode('2d');
           }}
@@ -322,6 +401,106 @@ export default function MapContainer({ onMapMove }: MapContainerProps) {
             ✕ Route failed
           </div>
         )}
+
+        {/* Sensor Suggestions */}
+        <div className="tb-sep" />
+        <span className="tb-section-lbl">SENSORS</span>
+
+        <button
+          style={scanStatus === 'loaded' ? tbBtnOn : {
+            ...tbBtnBase,
+            opacity: scanStatus === 'loading' ? 0.6 : 1,
+            cursor: scanStatus === 'loading' ? 'not-allowed' : 'pointer',
+          }}
+          disabled={scanStatus === 'loading'}
+          onClick={() => {
+            if (scanStatus === 'loaded') clearScanners();
+            else loadScanners();
+          }}
+        >
+          {scanStatus === 'loading'
+            ? '📡 Scanning…'
+            : scanStatus === 'loaded'
+            ? '📡 Network ✓'
+            : '📡 Suggest Sensors'}
+        </button>
+
+        {scanStatus === 'loaded' && scanners.length > 0 && (
+          <div style={{ fontSize: '10px', color: 'rgba(168,85,247,0.6)', padding: '1px 0' }}>
+            {scanners.length} scanners:{' '}
+            {scanners.filter(s => s.type === 'trailhead').length} entry{' · '}
+            {scanners.filter(s => s.type === 'junction').length} junction{' · '}
+            {scanners.filter(s => s.type === 'destination').length} hotspot
+          </div>
+        )}
+
+        {scanStatus === 'error' && (
+          <div style={{ fontSize: '10px', color: '#ef4444', padding: '2px 0' }}>
+            ✕ Scan failed
+          </div>
+        )}
+
+        {/* Hike Planner */}
+        <div className="tb-sep" />
+        <span className="tb-section-lbl">HIKE PLAN</span>
+
+        <button
+          style={hikeMode ? tbBtnOn : tbBtnBase}
+          onClick={() => {
+            if (!hikeMode) setRoutingMode('view');
+            setHikeMode(v => !v);
+          }}
+        >
+          {hikeMode ? '+ Adding…' : '+ Add Node'}
+        </button>
+
+        <button
+          style={tbBtnBase}
+          onClick={loadExampleRoute}
+        >
+          ⬡ Load Example
+        </button>
+
+        {hikeWaypoints.length > 0 && (
+          <button
+            style={{ ...tbBtnBase, color: '#ef4444', borderColor: 'rgba(239,68,68,0.3)' }}
+            onClick={clearHikeRoute}
+          >
+            ↺ Clear Route
+          </button>
+        )}
+
+        {hikeWaypoints.length > 0 && (
+          <div style={{ fontSize: '10px', color: 'rgba(176,216,200,0.4)', padding: '1px 0' }}>
+            {hikeWaypoints.length} node{hikeWaypoints.length !== 1 ? 's' : ''}
+          </div>
+        )}
+
+        {/* Drone SAR */}
+        <div className="tb-sep" />
+        <span className="tb-section-lbl">DRONE SAR</span>
+
+        <button
+          style={droneSearchActive ? tbBtnOn : tbBtnBase}
+          onClick={() => {
+            const next = !droneSearchActive;
+            setDroneSearchActive(next);
+            if (!next) {
+              setDroneUpdate(null);
+            } else {
+              setViewMode('3d');
+              setLayers(prev => ({ ...prev, osm: false }));
+            }
+          }}
+        >
+          {droneSearchActive ? '⬡ Abort Search' : '⬡ Launch SAR'}
+        </button>
+
+        {droneUpdate?.victimFound && (
+          <div style={{ fontSize: '10px', color: '#ff6020', padding: '2px 0', letterSpacing: '0.04em' }}>
+            ◉ VICTIM LOCATED
+          </div>
+        )}
       </div>
 
       {/* ── Mapbox Scene (3D terrain only) ────────────────────────────── */}
@@ -333,8 +512,17 @@ export default function MapContainer({ onMapMove }: MapContainerProps) {
           hotspotData={hotspots.data}
           hybridRoute={hybridRoute}
           onMove={handleMapboxMove}
-          boxZoomMode={boxZoomMode}
+          boxZoomMode={boxZoomMode && !hikeMode}
           flyTo={mapboxFlyTo}
+          hikeMode={hikeMode}
+          hikeWaypoints={hikeWaypoints}
+          onHikeNodeClick={handleHikeNodeAdded}
+          onMapReady={(m) => { mapboxMapRef.current = m; }}
+          bleScanners={scanners}
+          droneData={droneData}
+          incidentData={allIncidentMarkers}
+          droneSearchActive={droneSearchActive}
+          onDroneUpdate={setDroneUpdate}
         />
       </div>
 
@@ -350,7 +538,36 @@ export default function MapContainer({ onMapMove }: MapContainerProps) {
             onVictimSet={(pos) => { setVictim(pos); setRoutingMode('view'); }}
             initialView={sharedView}
             onMove={handleLeafletMove}
+            hikeMode={hikeMode}
+            hikeWaypoints={hikeWaypoints}
+            onHikeNodeAdded={handleHikeNodeAdded}
+            bleScanners={scanners}
+            droneData={droneData}
+            incidentData={allIncidentMarkers}
+            dangerZones={dangerZones}
+            layers={layers}
           />
+        </div>
+      )}
+
+      {/* ── Hike route panel ──────────────────────────────────────────── */}
+      {hikeStats && (
+        <div style={{
+          position: 'absolute', bottom: 48, right: 16,
+          width: 300, zIndex: 820,
+          pointerEvents: 'none',
+        }}>
+          <HikeRoutePanel waypoints={hikeWaypoints} stats={hikeStats} />
+        </div>
+      )}
+
+      {/* ── Drone SAR flight panel ────────────────────────────────────── */}
+      {droneSearchActive && (
+        <div style={{
+          position: 'absolute', bottom: 16, right: 16,
+          width: 420, zIndex: 821, pointerEvents: 'none',
+        }}>
+          <DroneFlightPanel update={droneUpdate} />
         </div>
       )}
 
@@ -428,7 +645,13 @@ export default function MapContainer({ onMapMove }: MapContainerProps) {
             <div className="legend-item"><span className="legend-dot" style={{ background: 'var(--db-amber)' }} />Drone · Active</div>
             <div className="legend-item"><span className="legend-dot" style={{ background: 'var(--db-red)' }} />Incident · Critical</div>
             <div className="legend-item"><span className="legend-line" style={{ background: 'rgba(74,159,212,0.6)' }} />Search Zone</div>
-            <div className="legend-item"><span className="legend-dot" style={{ background: '#FFD700' }} />Landmark</div>
+            <div className="legend-item">
+              <span className="legend-dot" style={{ background: 'rgba(255,193,7,0.4)', border: '1.5px solid #FFC107', borderRadius: '2px', transform: 'rotate(45deg)' }} />
+              Drone Hub
+            </div>
+            <div className="legend-item"><span className="legend-line" style={{ background: '#ef4444' }} />Trail · High Traffic</div>
+            <div className="legend-item"><span className="legend-line" style={{ background: '#f59e0b' }} />Trail · Medium Traffic</div>
+            <div className="legend-item"><span className="legend-line" style={{ background: '#22c55e' }} />Trail · Low Traffic</div>
             <div className="legend-item"><span className="legend-line" style={{ background: '#22d3ee' }} />Road Route</div>
             <div className="legend-item"><span className="legend-line" style={{ background: '#22c55e' }} />Mountain (Low)</div>
             <div className="legend-item"><span className="legend-line" style={{ background: '#ef4444' }} />Mountain (High Risk)</div>
