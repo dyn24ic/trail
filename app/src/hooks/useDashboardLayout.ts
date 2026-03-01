@@ -2,16 +2,16 @@
 
 import { useState, useEffect } from 'react';
 
-const STORAGE_KEY = 'trail_dashboard_layout_v2';
+const STORAGE_KEY = 'trail_dashboard_layout_v3';
 
 export interface DashboardLayout {
-  leftOpen: boolean;
-  rightOpen: boolean;
+  leftTab: 'fleet' | 'sensors' | 'weather';
+  rightTab: 'active' | 'ai';
 }
 
 const DEFAULT_LAYOUT: DashboardLayout = {
-  leftOpen: true,
-  rightOpen: true,
+  leftTab: 'fleet',
+  rightTab: 'active',
 };
 
 export function useDashboardLayout() {
@@ -24,8 +24,8 @@ export function useDashboardLayout() {
       if (stored) {
         const parsed = JSON.parse(stored) as Partial<DashboardLayout>;
         setLayout(prev => ({
-          leftOpen: parsed.leftOpen ?? prev.leftOpen,
-          rightOpen: parsed.rightOpen ?? prev.rightOpen,
+          leftTab: parsed.leftTab ?? prev.leftTab,
+          rightTab: parsed.rightTab ?? prev.rightTab,
         }));
       }
     } catch {
@@ -43,13 +43,13 @@ export function useDashboardLayout() {
     setLayout(next);
   }
 
-  function togglePanel(side: 'left' | 'right') {
-    save({
-      ...layout,
-      leftOpen: side === 'left' ? !layout.leftOpen : layout.leftOpen,
-      rightOpen: side === 'right' ? !layout.rightOpen : layout.rightOpen,
-    });
+  function setLeftTab(tab: DashboardLayout['leftTab']) {
+    save({ ...layout, leftTab: tab });
   }
 
-  return { layout, hydrated, togglePanel };
+  function setRightTab(tab: DashboardLayout['rightTab']) {
+    save({ ...layout, rightTab: tab });
+  }
+
+  return { layout, hydrated, setLeftTab, setRightTab };
 }
