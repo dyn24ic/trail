@@ -24,7 +24,7 @@ export default function FeaturesSection() {
           <span className="feat-num">03</span>
           <div className="feat-icon">△</div>
           <div className="feat-title">AI Prediction</div>
-          <p className="feat-desc">Predictive models fuse historical incidents, terrain topology, weather, and time-of-day data to rank the top 3 most probable search zones before a drone lifts off.</p>
+          <p className="feat-desc">Our XGBoost model is designed to generalise — it predicts accident hotspots even in poorly-characterised regions and country parks where no historical incident data exists, using terrain, weather, and exposure features alone. Fine-tuning on local data then sharpens victim location accuracy and optimal path selection, directly cutting rescue time when every second counts.</p>
           <div className="feat-metric">94%<small>zone prediction accuracy</small></div>
         </div>
         <div className="feat-card">
@@ -47,6 +47,13 @@ export default function FeaturesSection() {
           <div className="feat-title">Trail Intelligence</div>
           <p className="feat-desc">Every incident feeds the learning system. Trail difficulty ratings, personal risk scores, sensor placement, and predictive warnings all improve automatically over time.</p>
           <div className="feat-metric">∞<small>continuous learning</small></div>
+        </div>
+        <div className="feat-card">
+          <span className="feat-num">07</span>
+          <div className="feat-icon">⊛</div>
+          <div className="feat-title">Passive Hiker Tracking</div>
+          <p className="feat-desc">Sensors passively capture WiFi probe requests and Bluetooth advertisements broadcast by hikers' devices. Each device's MAC address is logged as it passes a checkpoint, letting the system build a movement timeline and automatically flag any hiker who fails to clear an expected waypoint — no app download required.</p>
+          <div className="feat-metric">Zero<small>app install required</small></div>
         </div>
       </div>
     </section>
