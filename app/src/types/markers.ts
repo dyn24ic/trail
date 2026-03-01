@@ -13,6 +13,8 @@ export interface DroneMarker {
   alt: number; // meters AGL
   color: number; // hex
   label: string;
+  hubLat: number; // launch pad position
+  hubLon: number;
 }
 
 export interface IncidentMarker {
@@ -21,4 +23,18 @@ export interface IncidentMarker {
   lon: number;
   color: number;
   severity: 'critical' | 'warning' | 'info';
+  label?: string;
+}
+
+export interface BleScannerSuggestion {
+  id: string;
+  lat: number;
+  lon: number;
+  name: string;
+  label: string;
+  rationale: string;
+  type: 'trailhead' | 'junction' | 'destination';
+  priority: 'critical' | 'high' | 'medium';
+  elevation_m: number;
+  coverageRadiusM: 80;
 }
