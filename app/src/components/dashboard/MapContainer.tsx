@@ -318,7 +318,7 @@ export default function MapContainer({ onMapMove }: MapContainerProps) {
         )}
       </div>
 
-      {/* ── Mapbox Scene (3D terrain or 2D satellite) ─────────────────── */}
+      {/* ── Mapbox Scene (3D terrain only) ────────────────────────────── */}
       <div style={{ display: viewMode === '3d' ? 'block' : 'none', position: 'absolute', inset: 0 }}>
         <MapboxScene
           viewMode={viewMode}
@@ -329,21 +329,8 @@ export default function MapContainer({ onMapMove }: MapContainerProps) {
         />
       </div>
 
-      {/* ── Mapbox 2D mode (no route planning) ────────────────────────── */}
-      {viewMode === '2d' && routingMode === 'view' && !hybridRoute && (
-        <div style={{ position: 'absolute', inset: 0 }}>
-          <MapboxScene
-            viewMode="2d"
-            layers={layers}
-            dangerZones={dangerZones}
-            hotspotData={hotspots.data}
-            onMove={handleMapMove}
-          />
-        </div>
-      )}
-
-      {/* ── 2D Leaflet for route planning / visualization ─────────────── */}
-      {viewMode === '2d' && (routingMode !== 'view' || hybridRoute) && (
+      {/* ── 2D Leaflet (always used in 2D mode) ───────────────────────── */}
+      {viewMode === '2d' && (
         <div style={{ position: 'absolute', inset: 0, zIndex: 1 }}>
           <LeafletMapView
             mode={routingMode}
