@@ -170,6 +170,9 @@ class IncidentService(
   def listIncidents: IO[List[Incident]] =
     repo.findAll
 
+  def deleteAllIncidents: IO[Int] =
+    repo.deleteAll
+
   def getReport(id: String): IO[Option[IncidentReport]] =
     repo.findById(id).map(_.flatMap(_.report))
 

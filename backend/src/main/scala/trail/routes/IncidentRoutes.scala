@@ -26,6 +26,14 @@ object IncidentRoutes:
         Ok(incidents.map(toSummary).asJson)
       }
 
+    case DELETE -> Root / "api" / "v1" / "incidents" =>
+      service.deleteAllIncidents.flatMap { count =>
+        Ok(io.circe.Json.obj(
+          "deleted" -> count.asJson,
+          "message" -> "All incidents deleted".asJson
+        ))
+      }
+
     case GET -> Root / "api" / "v1" / "incidents" / id =>
       service.getIncident(id).flatMap:
         case Some(incident) => Ok(incident.asJson)

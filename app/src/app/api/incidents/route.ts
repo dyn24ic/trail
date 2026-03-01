@@ -12,6 +12,16 @@ export async function GET() {
   }
 }
 
+export async function DELETE() {
+  try {
+    const res = await fetch(`${SCALA}/api/v1/incidents`, { method: 'DELETE' });
+    if (!res.ok) return NextResponse.json({ error: 'Scala backend error' }, { status: res.status });
+    return NextResponse.json(await res.json());
+  } catch {
+    return NextResponse.json({ error: 'Scala backend unavailable' }, { status: 503 });
+  }
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
