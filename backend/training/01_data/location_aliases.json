@@ -1,0 +1,109 @@
+{
+  "_comment": "Yosemite landmark / trail name → WGS84 coordinates. Used by scrape_nps_incidents.py to geocode free-text location fields. Add entries here as new aliases are encountered in the incident text.",
+
+  "Half Dome": {"lat": 37.7456, "lon": -119.5330, "type": "summit"},
+  "Half Dome cables": {"lat": 37.7456, "lon": -119.5330, "type": "trail"},
+  "Half Dome Cable Route": {"lat": 37.7456, "lon": -119.5330, "type": "trail"},
+  "Sub Dome": {"lat": 37.7449, "lon": -119.5307, "type": "trail"},
+
+  "Mist Trail": {"lat": 37.7320, "lon": -119.5455, "type": "trail"},
+  "Nevada Fall": {"lat": 37.7282, "lon": -119.5328, "type": "waterfall"},
+  "Nevada Falls": {"lat": 37.7282, "lon": -119.5328, "type": "waterfall"},
+  "Vernal Fall": {"lat": 37.7225, "lon": -119.5423, "type": "waterfall"},
+  "Vernal Falls": {"lat": 37.7225, "lon": -119.5423, "type": "waterfall"},
+  "Liberty Cap": {"lat": 37.7296, "lon": -119.5306, "type": "summit"},
+
+  "El Capitan": {"lat": 37.7340, "lon": -119.6375, "type": "cliff"},
+  "El Cap": {"lat": 37.7340, "lon": -119.6375, "type": "cliff"},
+  "El Capitan base": {"lat": 37.7368, "lon": -119.6323, "type": "cliff"},
+  "The Nose": {"lat": 37.7340, "lon": -119.6375, "type": "climbing_route"},
+
+  "Yosemite Falls": {"lat": 37.7530, "lon": -119.5955, "type": "waterfall"},
+  "Upper Yosemite Fall": {"lat": 37.7530, "lon": -119.5955, "type": "waterfall"},
+  "Lower Yosemite Fall": {"lat": 37.7497, "lon": -119.5973, "type": "waterfall"},
+  "Yosemite Falls Trail": {"lat": 37.7514, "lon": -119.5944, "type": "trail"},
+
+  "Clouds Rest": {"lat": 37.7609, "lon": -119.4887, "type": "summit"},
+  "Tenaya Lake": {"lat": 37.8368, "lon": -119.4671, "type": "lake"},
+  "Tenaya Canyon": {"lat": 37.7553, "lon": -119.5152, "type": "canyon"},
+  "Tenaya Creek": {"lat": 37.7467, "lon": -119.5558, "type": "creek"},
+  "Tenaya Creek Trail": {"lat": 37.7467, "lon": -119.5558, "type": "trail"},
+
+  "Tuolumne Meadows": {"lat": 37.8769, "lon": -119.3591, "type": "meadow"},
+  "Tuolumne River": {"lat": 37.8769, "lon": -119.3591, "type": "river"},
+  "Dana Meadows": {"lat": 37.8989, "lon": -119.2553, "type": "meadow"},
+  "Mount Dana": {"lat": 37.8999, "lon": -119.2213, "type": "summit"},
+  "Mount Lyell": {"lat": 37.7395, "lon": -119.2706, "type": "summit"},
+
+  "Merced River": {"lat": 37.7162, "lon": -119.5900, "type": "river"},
+  "Merced Canyon": {"lat": 37.6560, "lon": -119.8300, "type": "canyon"},
+  "Happy Isles": {"lat": 37.7239, "lon": -119.5600, "type": "area"},
+
+  "Mirror Lake": {"lat": 37.7468, "lon": -119.5534, "type": "lake"},
+  "North Dome": {"lat": 37.7681, "lon": -119.5181, "type": "summit"},
+  "Royal Arches": {"lat": 37.7441, "lon": -119.5610, "type": "cliff"},
+  "Washington Column": {"lat": 37.7413, "lon": -119.5555, "type": "cliff"},
+  "Sentinel Rock": {"lat": 37.7290, "lon": -119.5960, "type": "cliff"},
+  "Cathedral Rock": {"lat": 37.7124, "lon": -119.5944, "type": "cliff"},
+  "Cathedral Spires": {"lat": 37.7200, "lon": -119.5920, "type": "cliff"},
+  "Leaning Tower": {"lat": 37.7115, "lon": -119.6461, "type": "cliff"},
+  "Cookie Cliff": {"lat": 37.7058, "lon": -119.8145, "type": "cliff"},
+  "Fairview Dome": {"lat": 37.8522, "lon": -119.3812, "type": "dome"},
+  "Lembert Dome": {"lat": 37.8824, "lon": -119.3479, "type": "dome"},
+
+  "Glacier Point": {"lat": 37.7307, "lon": -119.5737, "type": "viewpoint"},
+  "Glacier Point Road": {"lat": 37.7200, "lon": -119.6000, "type": "road"},
+
+  "Bridalveil Fall": {"lat": 37.7165, "lon": -119.6488, "type": "waterfall"},
+  "Bridalveil Falls": {"lat": 37.7165, "lon": -119.6488, "type": "waterfall"},
+  "Ribbon Falls": {"lat": 37.7470, "lon": -119.6443, "type": "waterfall"},
+  "Ribbon Fall": {"lat": 37.7470, "lon": -119.6443, "type": "waterfall"},
+
+  "Wawona": {"lat": 37.5368, "lon": -119.6534, "type": "area"},
+  "Wawona District": {"lat": 37.5368, "lon": -119.6534, "type": "area"},
+  "Wawona Campground": {"lat": 37.5341, "lon": -119.6570, "type": "campground"},
+  "South Entrance": {"lat": 37.5103, "lon": -119.6458, "type": "entrance"},
+
+  "Badger Pass": {"lat": 37.6642, "lon": -119.6632, "type": "ski_area"},
+  "Badger Pass Ski Area": {"lat": 37.6642, "lon": -119.6632, "type": "ski_area"},
+  "Westfall Meadow": {"lat": 37.6498, "lon": -119.6440, "type": "meadow"},
+
+  "Tioga Road": {"lat": 37.8300, "lon": -119.3500, "type": "road"},
+  "Tioga Pass": {"lat": 37.9101, "lon": -119.2569, "type": "pass"},
+  "Mono Pass Trailhead": {"lat": 37.8855, "lon": -119.2832, "type": "trailhead"},
+
+  "Highway 41": {"lat": 37.6000, "lon": -119.6500, "type": "road"},
+  "Hwy 41": {"lat": 37.6000, "lon": -119.6500, "type": "road"},
+  "Highway 140": {"lat": 37.6900, "lon": -119.8500, "type": "road"},
+  "Route 140": {"lat": 37.6900, "lon": -119.8500, "type": "road"},
+  "Big Oak Flat Road": {"lat": 37.7870, "lon": -119.7100, "type": "road"},
+  "Arch Rock": {"lat": 37.6887, "lon": -119.8244, "type": "area"},
+  "El Portal": {"lat": 37.6742, "lon": -119.7806, "type": "area"},
+  "Pohono Bridge": {"lat": 37.7212, "lon": -119.6486, "type": "bridge"},
+
+  "Yosemite Valley": {"lat": 37.7459, "lon": -119.5332, "type": "valley"},
+  "Valley Floor": {"lat": 37.7459, "lon": -119.5332, "type": "valley"},
+  "Curry Village": {"lat": 37.7363, "lon": -119.5677, "type": "area"},
+  "Camp Curry": {"lat": 37.7363, "lon": -119.5677, "type": "campground"},
+  "Housekeeping Camp": {"lat": 37.7380, "lon": -119.5811, "type": "campground"},
+  "Yosemite Village": {"lat": 37.7490, "lon": -119.5878, "type": "area"},
+  "Yosemite Lodge": {"lat": 37.7453, "lon": -119.5947, "type": "area"},
+  "Valley Visitor Center": {"lat": 37.7490, "lon": -119.5878, "type": "area"},
+
+  "Crane Flat": {"lat": 37.7960, "lon": -119.7826, "type": "area"},
+  "White Wolf": {"lat": 37.8685, "lon": -119.6441, "type": "area"},
+  "White Wolfe Campground": {"lat": 37.8685, "lon": -119.6441, "type": "campground"},
+  "Porcupine Flat": {"lat": 37.8393, "lon": -119.5017, "type": "campground"},
+  "Rancheria Flats": {"lat": 37.6742, "lon": -119.7806, "type": "area"},
+
+  "Gaylor Lakes": {"lat": 37.9088, "lon": -119.2647, "type": "lake"},
+  "Wildcat Creek": {"lat": 37.7050, "lon": -119.6750, "type": "creek"},
+  "Cascade Creek": {"lat": 37.7395, "lon": -119.6554, "type": "creek"},
+  "Illilouette Creek": {"lat": 37.7200, "lon": -119.5400, "type": "creek"},
+  "Tunnel View": {"lat": 37.7189, "lon": -119.5886, "type": "viewpoint"},
+  "Valley View": {"lat": 37.7261, "lon": -119.6284, "type": "viewpoint"},
+
+  "Hetch Hetchy": {"lat": 37.9520, "lon": -119.7874, "type": "reservoir"},
+  "Grand Canyon of Tuolumne": {"lat": 37.8900, "lon": -119.5800, "type": "canyon"},
+  "Little Yosemite Valley": {"lat": 37.7286, "lon": -119.5200, "type": "valley"}
+}

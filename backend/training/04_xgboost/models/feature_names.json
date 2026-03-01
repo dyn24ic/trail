@@ -1,0 +1,21 @@
+[
+  "fire_score",
+  "weather_score",
+  "terrain_score",
+  "water_score",
+  "access_score",
+  "composite_score",
+  "lat_norm",
+  "lon_norm",
+  "lat_abs",
+  "lon_abs",
+  "month_sin",
+  "month_cos",
+  "hour_sin",
+  "hour_cos",
+  "weather_risk",
+  "fire_danger",
+  "flood_encoded",
+  "road_count_norm",
+  "has_closure"
+]

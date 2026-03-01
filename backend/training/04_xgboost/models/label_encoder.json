@@ -1,0 +1,24 @@
+{
+  "int_to_type": {
+    "0": "fall",
+    "1": "drowning",
+    "2": "medical",
+    "3": "vehicle",
+    "4": "rockfall",
+    "5": "lightning",
+    "6": "search_rescue",
+    "7": "fire_related",
+    "8": "unknown"
+  },
+  "type_to_int": {
+    "fall": 0,
+    "drowning": 1,
+    "medical": 2,
+    "vehicle": 3,
+    "rockfall": 4,
+    "lightning": 5,
+    "search_rescue": 6,
+    "fire_related": 7,
+    "unknown": 8
+  }
+}

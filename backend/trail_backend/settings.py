@@ -89,8 +89,20 @@ REST_FRAMEWORK = {
 }
 
 # External API keys
-OPENAI_API_KEY = os.getenv('OPENAI_API_KEY', '')
+OPENAI_API_KEY      = os.getenv('OPENAI_API_KEY', '')
 OPENWEATHER_API_KEY = os.getenv('OPENWEATHER_API_KEY', '')
+
+# Brev-hosted Nemotron inference server
+# Set BREV_INFERENCE_URL to e.g. http://<brev-host>:8080 to enable Nemotron.
+# When set, hotspot_service.py uses Nemotron instead of GPT-4o.
+BREV_INFERENCE_URL = os.getenv('BREV_INFERENCE_URL', '')
+BREV_API_KEY       = os.getenv('BREV_API_KEY', '')
+
+# XGBoost trained model directory
+# Set XGBOOST_MODEL_DIR to the directory containing:
+#   hotspot_model.json, incident_type_model.json, label_encoder.json
+# (produced by backend/training/04_xgboost/train_xgboost.py)
+XGBOOST_MODEL_DIR = os.getenv('XGBOOST_MODEL_DIR', '')
 
 # DEM tile cache directory
 DEM_CACHE_DIR = BASE_DIR / 'dem_cache'
