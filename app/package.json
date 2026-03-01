@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "node --env-file=../.env.frontend node_modules/.bin/next dev",
+    "dev": "next dev",
     "build": "next build",
     "start": "next start",
     "lint": "eslint"
@@ -21,6 +21,7 @@
   },
   "devDependencies": {
     "@types/leaflet": "^1.9.14",
+    "@types/mapbox__point-geometry": "^1.0.87",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",

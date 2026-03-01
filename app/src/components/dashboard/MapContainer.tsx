@@ -331,6 +331,7 @@ export default function MapContainer({ onMapMove }: MapContainerProps) {
           layers={layers}
           dangerZones={dangerZones}
           hotspotData={hotspots.data}
+          hybridRoute={hybridRoute}
           onMove={handleMapboxMove}
           boxZoomMode={boxZoomMode}
           flyTo={mapboxFlyTo}

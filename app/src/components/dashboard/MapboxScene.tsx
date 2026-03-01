@@ -5,7 +5,7 @@ import mapboxgl from 'mapbox-gl';
 import { useRef, useEffect, useCallback } from 'react';
 import { YOSEMITE_BBOX } from '@/data/trailBbox';
 import { YOSEMITE_BOUNDARY, WORLD_RING } from '@/data/yosemiteBoundary';
-import type { DangerZone } from '@/types/backend';
+import type { DangerZone, HybridRoute } from '@/types/backend';
 import type { HotspotPredictionResponse } from '@/types/hotspots';
 
 interface MapboxSceneProps {
@@ -21,6 +21,7 @@ interface MapboxSceneProps {
   };
   dangerZones: DangerZone[];
   hotspotData: HotspotPredictionResponse | null;
+  hybridRoute?: HybridRoute | null;
   onMove?: (lat: number, lon: number, zoom: number) => void;
   boxZoomMode?: boolean;
   flyTo?: { lat: number; lon: number; zoom: number; v: number } | null;
@@ -33,6 +34,7 @@ export default function MapboxScene({
   viewMode,
   dangerZones,
   hotspotData,
+  hybridRoute,
   onMove,
   boxZoomMode = false,
   flyTo,
@@ -393,6 +395,145 @@ export default function MapboxScene({
       map.once('load', addHotspots);
     }
   }, [hotspotData]);
+
+  // Hybrid route layers (mountain walk + road drive + markers)
+  useEffect(() => {
+    const _map = mapRef.current;
+    if (!_map) return;
+    // Explicitly typed as non-null so closures (cleanup/addRoute) inherit the narrowed type
+    const map: mapboxgl.Map = _map;
+
+    const ROUTE_LAYERS  = ['route-road', 'route-mountain', 'route-stop', 'route-victim'];
+    const ROUTE_SOURCES = ['route-road-src', 'route-mountain-src', 'route-stop-src', 'route-victim-src'];
+
+    function cleanup() {
+      ROUTE_LAYERS.forEach(id  => { try { if (map.getLayer(id))   map.removeLayer(id);   } catch {} });
+      ROUTE_SOURCES.forEach(id => { try { if (map.getSource(id)) map.removeSource(id); } catch {} });
+    }
+
+    function addRoute() {
+      cleanup();
+      if (!hybridRoute) return;
+
+      const wps = hybridRoute.mountainRoute.route.waypoints;
+      if (wps.length < 2) return;
+
+      // ── Road segment (cyan dashed) ──────────────────────────────────
+      if (hybridRoute.roadPath.length >= 2) {
+        map.addSource('route-road-src', {
+          type: 'geojson',
+          data: {
+            type: 'Feature',
+            properties: {},
+            geometry: {
+              type: 'LineString',
+              coordinates: hybridRoute.roadPath.map(p => [p.lon, p.lat]),
+            },
+          },
+        });
+        map.addLayer({
+          id: 'route-road',
+          type: 'line',
+          source: 'route-road-src',
+          layout: { 'line-cap': 'round', 'line-join': 'round' },
+          paint: { 'line-color': '#22d3ee', 'line-width': 4, 'line-dasharray': [2, 2] },
+        });
+      }
+
+      // ── Mountain segment (elevation gradient via line-progress) ──────
+      map.addSource('route-mountain-src', {
+        type: 'geojson',
+        lineMetrics: true,
+        data: {
+          type: 'Feature',
+          properties: {},
+          geometry: {
+            type: 'LineString',
+            coordinates: wps.map(w => [w.lon, w.lat]),
+          },
+        },
+      });
+      map.addLayer({
+        id: 'route-mountain',
+        type: 'line',
+        source: 'route-mountain-src',
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: {
+          'line-width': 5,
+          'line-gradient': [
+            'interpolate', ['linear'], ['line-progress'],
+            0,   '#22c55e',
+            0.4, '#eab308',
+            0.75,'#f97316',
+            1,   '#ef4444',
+          ],
+        },
+      });
+
+      // ── Stop point (orange circle) ───────────────────────────────────
+      map.addSource('route-stop-src', {
+        type: 'geojson',
+        data: {
+          type: 'Feature',
+          properties: {},
+          geometry: { type: 'Point', coordinates: [hybridRoute.stopPoint.lon, hybridRoute.stopPoint.lat] },
+        },
+      });
+      map.addLayer({
+        id: 'route-stop',
+        type: 'circle',
+        source: 'route-stop-src',
+        paint: {
+          'circle-radius': 10,
+          'circle-color': '#f97316',
+          'circle-stroke-width': 3,
+          'circle-stroke-color': '#ffffff',
+        },
+      });
+
+      // ── Victim point (red circle) ────────────────────────────────────
+      const last = wps[wps.length - 1];
+      map.addSource('route-victim-src', {
+        type: 'geojson',
+        data: {
+          type: 'Feature',
+          properties: {},
+          geometry: { type: 'Point', coordinates: [last.lon, last.lat] },
+        },
+      });
+      map.addLayer({
+        id: 'route-victim',
+        type: 'circle',
+        source: 'route-victim-src',
+        paint: {
+          'circle-radius': 12,
+          'circle-color': '#ef4444',
+          'circle-stroke-width': 3,
+          'circle-stroke-color': '#ffffff',
+        },
+      });
+
+      // ── Fit map to the full route ─────────────────────────────────────
+      const allCoords = [
+        ...hybridRoute.roadPath.map(p => [p.lon, p.lat] as [number, number]),
+        ...wps.map(w => [w.lon, w.lat] as [number, number]),
+      ];
+      const bounds = allCoords.reduce(
+        (b, c) => b.extend(c),
+        new mapboxgl.LngLatBounds(allCoords[0], allCoords[0]),
+      );
+      map.fitBounds(bounds, { padding: 80, pitch: 55, bearing: -20, duration: 1500 });
+    }
+
+    if (map.isStyleLoaded()) {
+      addRoute();
+    } else {
+      map.once('load', addRoute);
+    }
+
+    return cleanup;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hybridRoute]);
 
   if (!token) {
     return (
