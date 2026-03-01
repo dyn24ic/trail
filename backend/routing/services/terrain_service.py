@@ -2,15 +2,20 @@
 Terrain Service – fetches DEM data via seamless-3dep and computes
 slope/aspect/hazard grids used for routing.
 """
+import hashlib
 import math
 import logging
 import tempfile
+from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from pathlib import Path
 from typing import Optional
 
 import numpy as np
+from django.conf import settings
 
 logger = logging.getLogger(__name__)
+
+DEM_FETCH_TIMEOUT = 15  # seconds – fall back to synthetic DEM if exceeded
 
 
 def _bbox_from_coords(lat1: float, lon1: float, lat2: float, lon2: float, pad: float = 0.01):
@@ -20,6 +25,31 @@ def _bbox_from_coords(lat1: float, lon1: float, lat2: float, lon2: float, pad: f
     south = min(lat1, lat2) - pad
     north = max(lat1, lat2) + pad
     return (west, south, east, north)
+
+
+def _fetch_dem(bbox: tuple) -> np.ndarray:
+    """Fetch DEM tiles via seamless-3dep with a timeout guard."""
+    import seamless_3dep as s3dep
+
+    def _do_fetch():
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tiff_files = s3dep.get_dem(bbox, tmpdir)
+            if not tiff_files:
+                raise RuntimeError("No DEM tiles returned for bbox")
+            dem_da = s3dep.tiffs_to_da(tiff_files, bbox, crs=4326)
+            elevation = np.array(dem_da.values, dtype=float)
+            if elevation.ndim == 3:
+                elevation = elevation[0]
+            return np.where(np.isnan(elevation), 0, elevation)
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(_do_fetch)
+        try:
+            return future.result(timeout=DEM_FETCH_TIMEOUT)
+        except TimeoutError:
+            raise RuntimeError(
+                f"DEM fetch timed out after {DEM_FETCH_TIMEOUT}s"
+            )
 
 
 def get_terrain_data(lat1: float, lon1: float, lat2: float, lon2: float) -> dict:
@@ -35,22 +65,35 @@ def get_terrain_data(lat1: float, lon1: float, lat2: float, lon2: float) -> dict
     """
     bbox = _bbox_from_coords(lat1, lon1, lat2, lon2, pad=0.02)
 
-    try:
-        import seamless_3dep as s3dep
+    # --- DEM cache lookup ---
+    cache_dir = getattr(settings, "DEM_CACHE_DIR", None)
+    cache_key = hashlib.sha256(f"{bbox}".encode()).hexdigest()[:16]
+    cache_path = Path(cache_dir) / f"{cache_key}.npz" if cache_dir else None
 
-        with tempfile.TemporaryDirectory() as tmpdir:
-            tiff_files = s3dep.get_dem(bbox, tmpdir)
-            if not tiff_files:
-                raise RuntimeError("No DEM tiles returned for bbox")
-            dem_da = s3dep.tiffs_to_da(tiff_files, bbox, crs=4326)
-            elevation = np.array(dem_da.values, dtype=float)
-            if elevation.ndim == 3:
-                elevation = elevation[0]
-            elevation = np.where(np.isnan(elevation), 0, elevation)
+    if cache_path and cache_path.exists():
+        try:
+            elevation = np.load(cache_path)["elevation"]
+            logger.info("DEM cache hit: %s", cache_path.name)
+        except Exception:
+            logger.warning("Corrupt DEM cache file %s – refetching", cache_path)
+            elevation = None
+    else:
+        elevation = None
 
-    except Exception as exc:
-        logger.warning("seamless-3dep unavailable (%s) – using synthetic DEM", exc)
-        elevation = _synthetic_dem(bbox)
+    if elevation is None:
+        try:
+            elevation = _fetch_dem(bbox)
+            # Save to cache
+            if cache_path:
+                try:
+                    cache_path.parent.mkdir(parents=True, exist_ok=True)
+                    np.savez_compressed(cache_path, elevation=elevation)
+                    logger.info("DEM cached: %s", cache_path.name)
+                except Exception as save_exc:
+                    logger.warning("Failed to save DEM cache: %s", save_exc)
+        except Exception as exc:
+            logger.warning("DEM fetch failed (%s) – using synthetic DEM", exc)
+            elevation = _synthetic_dem(bbox)
 
     slope, aspect = _compute_slope_aspect(elevation, bbox)
     hazard = _compute_hazard(slope, elevation)

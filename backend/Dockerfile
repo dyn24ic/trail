@@ -37,4 +37,4 @@ ENV DJANGO_SETTINGS_MODULE=trail_backend.settings \
 
 EXPOSE 8000
 # Migrate at startup so the shared volume is mounted before the DB is created
-CMD ["sh", "-c", "mkdir -p /app/db && python manage.py migrate --run-syncdb && python manage.py runserver 0.0.0.0:8000"]
+CMD ["sh", "-c", "mkdir -p /app/db && python manage.py migrate --run-syncdb && gunicorn trail_backend.wsgi:application --bind 0.0.0.0:8000 --workers 4 --threads 2 --timeout 120 --access-logfile - --error-logfile -"]
