@@ -174,6 +174,7 @@ export default function MapContainer({ onMapMove, deviantHikers = [] }: MapConta
     victimPos,
     hybridRoute,
     status: routeStatus,
+    error: routeError,
     setAmbulance,
     setVictim,
     computeRoute,
@@ -410,8 +411,13 @@ export default function MapContainer({ onMapMove, deviantHikers = [] }: MapConta
         )}
 
         {routeStatus === 'error' && (
-          <div style={{ fontSize: '10px', color: '#ef4444', padding: '2px 0', lineHeight: 1.3 }}>
-            ✕ Route failed
+          <div style={{ fontSize: '10px', color: '#ef4444', padding: '2px 0', lineHeight: 1.4 }}>
+            <span>✕ Route failed</span>
+            {routeError && (
+              <div style={{ marginTop: '3px', color: '#fca5a5', fontFamily: 'monospace', wordBreak: 'break-word' }}>
+                {routeError}
+              </div>
+            )}
           </div>
         )}
 

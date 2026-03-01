@@ -117,7 +117,12 @@ def calculate_route_view(request):
         })
 
     except Exception as exc:
-        logger.exception("Route calculation failed")
+        logger.exception(
+            "Route calculation failed | responder=(%.5f,%.5f) victim=(%.5f,%.5f) severity=%s type=%s",
+            d["responder_lat"], d["responder_lon"],
+            d["victim_lat"], d["victim_lon"],
+            severity, route_type,
+        )
         return Response(
             {"error": str(exc)},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -191,7 +196,12 @@ def compare_routes_view(request):
         })
 
     except Exception as exc:
-        logger.exception("Route comparison failed")
+        logger.exception(
+            "Route comparison failed | responder=(%.5f,%.5f) victim=(%.5f,%.5f) severity=%s",
+            d["responder_lat"], d["responder_lon"],
+            d["victim_lat"], d["victim_lon"],
+            severity,
+        )
         return Response({"error": str(exc)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
@@ -228,7 +238,10 @@ def terrain_view(request):
             "grid_size": {"rows": rows, "cols": cols},
         })
     except Exception as exc:
-        logger.exception("Terrain fetch failed")
+        logger.exception(
+            "Terrain fetch failed | bbox=W%.5f S%.5f E%.5f N%.5f",
+            d["west"], d["south"], d["east"], d["north"],
+        )
         return Response({"error": str(exc)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
@@ -252,7 +265,10 @@ def weather_view(request):
         weather = get_weather(d["lat"], d["lon"])
         return Response({"status": "ok", "weather": weather, "location": d})
     except Exception as exc:
-        logger.exception("Weather fetch failed")
+        logger.exception(
+            "Weather fetch failed | lat=%.5f lon=%.5f",
+            d["lat"], d["lon"],
+        )
         return Response({"error": str(exc)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 

@@ -11,13 +11,17 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'lat and lon query params are required' }, { status: 400 });
   }
 
+  const url = `${BACKEND}/api/weather/?lat=${lat}&lon=${lon}`;
   try {
-    const res = await fetch(`${BACKEND}/api/weather/?lat=${lat}&lon=${lon}`, {
-      headers: { 'Accept': 'application/json' },
-    });
+    const res = await fetch(url, { headers: { 'Accept': 'application/json' } });
     const data = await res.json();
+    if (!res.ok) {
+      console.error(`[TRAIL][weather] Upstream ${res.status} from ${url}`);
+    }
     return NextResponse.json(data, { status: res.status });
-  } catch {
+  } catch (err) {
+    const msg = err instanceof Error ? `${err.constructor.name}: ${err.message}` : String(err);
+    console.error(`[TRAIL][weather] 503 — could not reach ${url} | ${msg}`);
     return NextResponse.json({ error: 'Backend unavailable' }, { status: 503 });
   }
 }

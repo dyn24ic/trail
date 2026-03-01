@@ -107,3 +107,66 @@ XGBOOST_MODEL_DIR = os.getenv('XGBOOST_MODEL_DIR', '')
 # DEM tile cache directory
 DEM_CACHE_DIR = BASE_DIR / 'dem_cache'
 DEM_CACHE_DIR.mkdir(exist_ok=True)
+
+# ── LOGGING ──────────────────────────────────────────────────────────────────
+# Writes structured lines to stdout so Docker / docker-compose logs picks them up.
+# Format: [2026-01-01 12:00:00] ERROR routing.views: Route calculation failed ...
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'trail': {
+            'format': '[{asctime}] {levelname} {name}: {message}',
+            'style': '{',
+            'datefmt': '%Y-%m-%d %H:%M:%S',
+        },
+    },
+    'handlers': {
+        'stdout': {
+            'class': 'logging.StreamHandler',
+            'formatter': 'trail',
+            'stream': 'ext://sys.stdout',
+        },
+    },
+    'root': {
+        'handlers': ['stdout'],
+        'level': 'WARNING',
+    },
+    'loggers': {
+        # Django internals — keep at INFO to catch 500s, migrations etc.
+        'django': {
+            'handlers': ['stdout'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+        'django.request': {
+            'handlers': ['stdout'],
+            'level': 'ERROR',
+            'propagate': False,
+        },
+        # Our app modules — DEBUG so every service step is visible
+        'routing': {
+            'handlers': ['stdout'],
+            'level': 'DEBUG',
+            'propagate': False,
+        },
+        'weather': {
+            'handlers': ['stdout'],
+            'level': 'DEBUG',
+            'propagate': False,
+        },
+    },
+}
+
+# ── STARTUP BANNER ────────────────────────────────────────────────────────────
+import sys  # noqa: E402
+print(
+    f"[trail-django] STARTUP"
+    f" | OPENAI_API_KEY={'SET' if OPENAI_API_KEY else 'NOT SET'}"
+    f" | OPENWEATHER_API_KEY={'SET' if OPENWEATHER_API_KEY else 'NOT SET'}"
+    f" | XGBOOST_MODEL_DIR={XGBOOST_MODEL_DIR or '(not set)'}"
+    f" | BREV_INFERENCE_URL={BREV_INFERENCE_URL or '(not set)'}"
+    f" | DB={_db_path}"
+    f" | DEBUG={DEBUG}",
+    file=sys.stdout, flush=True,
+)

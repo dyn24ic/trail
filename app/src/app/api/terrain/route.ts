@@ -16,14 +16,17 @@ export async function GET(req: NextRequest) {
     );
   }
 
+  const url = `${BACKEND}/api/terrain/?west=${west}&south=${south}&east=${east}&north=${north}`;
   try {
-    const url = `${BACKEND}/api/terrain/?west=${west}&south=${south}&east=${east}&north=${north}`;
-    const res = await fetch(url, {
-      headers: { 'Accept': 'application/json' },
-    });
+    const res = await fetch(url, { headers: { 'Accept': 'application/json' } });
     const data = await res.json();
+    if (!res.ok) {
+      console.error(`[TRAIL][terrain] Upstream ${res.status} from ${url}`);
+    }
     return NextResponse.json(data, { status: res.status });
-  } catch {
+  } catch (err) {
+    const msg = err instanceof Error ? `${err.constructor.name}: ${err.message}` : String(err);
+    console.error(`[TRAIL][terrain] 503 — could not reach ${url} | ${msg}`);
     return NextResponse.json({ error: 'Backend unavailable' }, { status: 503 });
   }
 }
