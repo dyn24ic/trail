@@ -26,7 +26,8 @@ services:
 
   nextjs:
     build:
-      context: ./app
+      context: .
+      dockerfile: app/Dockerfile
       args:
         BACKEND_URL: http://django:8000
     ports:

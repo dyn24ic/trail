@@ -1,12 +1,14 @@
 FROM node:22-alpine AS deps
 WORKDIR /app
-COPY package.json package-lock.json ./
+COPY app/package.json app/package-lock.json ./
 RUN npm ci
 
 FROM node:22-alpine AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
-COPY . .
+COPY app/ .
+# Copy root env file so NEXT_PUBLIC_* vars are available at build time
+COPY .env.frontend .env.frontend
 ENV NEXT_TELEMETRY_DISABLED=1
 
 # BACKEND_URL is baked in at build time for server components;
@@ -14,7 +16,9 @@ ENV NEXT_TELEMETRY_DISABLED=1
 ARG BACKEND_URL=http://django:8000
 ENV BACKEND_URL=$BACKEND_URL
 
-RUN --mount=type=cache,target=/root/.cache/next-swc npm run build
+RUN --mount=type=cache,target=/root/.cache/next-swc \
+    set -a && . ./.env.frontend && set +a && \
+    node_modules/.bin/next build
 
 FROM node:22-alpine AS runner
 WORKDIR /app
