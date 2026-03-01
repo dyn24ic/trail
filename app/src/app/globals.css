@@ -593,6 +593,7 @@ footer {
   border-bottom-color: rgba(255,59,59,0.35);
   box-shadow: 0 1px 12px rgba(255,59,59,0.08);
 }
+
 .tb-logo {
   font-family: var(--font-cinzel), 'Cinzel', serif;
   font-size: 1rem;
@@ -601,7 +602,17 @@ footer {
   color: var(--db-text-bright);
   flex-shrink: 0;
 }
-.tb-logo .ai { color: var(--db-amber); }
+.tb-logo .tb-lower {
+  text-transform: lowercase;
+  font-variant: normal;
+  font-family: 'Inter', var(--font-inter), Arial, sans-serif;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+}
+.tb-logo .ai {
+  color: var(--db-amber);
+  text-transform: uppercase;
+}
 .tb-vsep { width: 1px; height: 20px; background: var(--db-border2); flex-shrink: 0; }
 .tb-location { color: var(--db-muted); font-size: 0.68rem; }
 .tb-location strong { color: var(--db-text); font-weight: 500; }

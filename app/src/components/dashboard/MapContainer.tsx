@@ -130,7 +130,8 @@ interface MapContainerProps {
 }
 
 export default function MapContainer({ onMapMove }: MapContainerProps) {
-  const [center, setCenter] = useState<{ lat: number; lon: number } | null>(null);
+  const [sharedView, setSharedView] = useState({ lat: 37.74, lon: -119.58, zoom: 11 });
+  const [mapboxFlyTo, setMapboxFlyTo] = useState<{ lat: number; lon: number; zoom: number; v: number } | null>(null);
   const [layers, setLayers] = useState({
     sensors: true,
     drones: true,
@@ -185,9 +186,13 @@ export default function MapContainer({ onMapMove }: MapContainerProps) {
       .catch(() => {});
   }, []);
 
-  // Forward map move events to parent
-  function handleMapMove(lat: number, lon: number) {
-    setCenter({ lat, lon });
+  function handleMapboxMove(lat: number, lon: number, zoom: number) {
+    setSharedView({ lat, lon, zoom });
+    onMapMove?.(lat, lon);
+  }
+
+  function handleLeafletMove(lat: number, lon: number, zoom: number) {
+    setSharedView({ lat, lon, zoom });
     onMapMove?.(lat, lon);
   }
 
@@ -221,6 +226,7 @@ export default function MapContainer({ onMapMove }: MapContainerProps) {
         <div className="tb-sep" />
         <span className="tb-section-lbl">VIEW</span>
         <button className={`tb-view-btn${viewMode === '3d' ? ' on' : ''}`} onClick={() => {
+          if (viewMode !== '3d') setMapboxFlyTo({ ...sharedView, v: Date.now() });
           setViewMode('3d');
           setLayers(prev => ({ ...prev, osm: false }));
         }}>3D</button>
@@ -325,7 +331,9 @@ export default function MapContainer({ onMapMove }: MapContainerProps) {
           layers={layers}
           dangerZones={dangerZones}
           hotspotData={hotspots.data}
-          onMove={handleMapMove}
+          onMove={handleMapboxMove}
+          boxZoomMode={boxZoomMode}
+          flyTo={mapboxFlyTo}
         />
       </div>
 
@@ -339,6 +347,8 @@ export default function MapContainer({ onMapMove }: MapContainerProps) {
             hybridRoute={hybridRoute}
             onAmbulanceSet={(pos) => { setAmbulance(pos); setRoutingMode('view'); }}
             onVictimSet={(pos) => { setVictim(pos); setRoutingMode('view'); }}
+            initialView={sharedView}
+            onMove={handleLeafletMove}
           />
         </div>
       )}
@@ -407,14 +417,8 @@ export default function MapContainer({ onMapMove }: MapContainerProps) {
           </div>
 
           <div className="map-coords">
-            {center ? (
-              <>
-                {toDMS(center.lat, true)}&nbsp;&nbsp;{toDMS(center.lon, false)}<br />
-                Grid: {latLonToMGRS(center.lat, center.lon).replace(/ /g, '\u00a0')}
-              </>
-            ) : (
-              <>37°44&apos;45&quot;N&nbsp;&nbsp;119°31&apos;59&quot;W<br />Grid: —</>
-            )}
+            {toDMS(sharedView.lat, true)}&nbsp;&nbsp;{toDMS(sharedView.lon, false)}<br />
+            Grid: {latLonToMGRS(sharedView.lat, sharedView.lon).replace(/ /g, '\u00a0')}
           </div>
 
           <div className="map-overlay">

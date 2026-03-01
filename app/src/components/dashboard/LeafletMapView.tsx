@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Map as LeafletMap, Marker, Polyline, CircleMarker } from 'leaflet';
 import type { HybridRoute, LatLon } from '@/types/backend';
+import { YOSEMITE_BOUNDARY, WORLD_RING } from '@/data/yosemiteBoundary';
 
 export type RoutingMode = 'set-ambulance' | 'set-victim' | 'view';
 
@@ -13,6 +14,8 @@ interface Props {
   hybridRoute: HybridRoute | null;
   onAmbulanceSet: (pos: LatLon) => void;
   onVictimSet: (pos: LatLon) => void;
+  initialView?: { lat: number; lon: number; zoom: number };
+  onMove?: (lat: number, lon: number, zoom: number) => void;
 }
 
 // ── Elevation/hazard colour helper ─────────────────────────────────────────
@@ -75,6 +78,8 @@ export default function LeafletMapView({
   hybridRoute,
   onAmbulanceSet,
   onVictimSet,
+  initialView,
+  onMove,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<LeafletMap | null>(null);
@@ -92,6 +97,8 @@ export default function LeafletMapView({
   const modeRef = useRef(mode);
   const onAmbulanceSetRef = useRef(onAmbulanceSet);
   const onVictimSetRef = useRef(onVictimSet);
+  const onMoveRef = useRef(onMove);
+  useEffect(() => { onMoveRef.current = onMove; }, [onMove]);
 
   useEffect(() => { modeRef.current = mode; }, [mode]);
   useEffect(() => { onAmbulanceSetRef.current = onAmbulanceSet; }, [onAmbulanceSet]);
@@ -118,9 +125,14 @@ export default function LeafletMapView({
     import('leaflet').then((L) => {
       if (mapRef.current || !containerRef.current) return;
 
+      const initCenter: [number, number] = initialView
+        ? [initialView.lat, initialView.lon]
+        : [37.74, -119.58];
+      const initZoom = initialView?.zoom ?? 12;
+
       const map = L.map(containerRef.current, {
-        center: [37.74, -119.58],
-        zoom: 12,
+        center: initCenter,
+        zoom: initZoom,
         zoomControl: false,
       });
 
@@ -133,11 +145,60 @@ export default function LeafletMapView({
 
       L.control.zoom({ position: 'bottomright' }).addTo(map);
 
+      // ── Yosemite boundary fog of war ─────────────────────────────────────
+      // evenodd fill rule: inside world ring (1 crossing) = filled;
+      // inside Yosemite (2 crossings) = unfilled = map shows through.
+      L.geoJSON(
+        {
+          type: 'Feature',
+          properties: {},
+          geometry: {
+            type: 'Polygon',
+            coordinates: [WORLD_RING, YOSEMITE_BOUNDARY],
+          },
+        } as GeoJSON.Feature,
+        {
+          style: {
+            fillColor: '#020608',
+            fillOpacity: 0.72,
+            stroke: false,
+            fillRule: 'evenodd',
+          },
+          interactive: false,
+        }
+      ).addTo(map);
+
+      // Park boundary dashed line
+      L.geoJSON(
+        {
+          type: 'Feature',
+          properties: {},
+          geometry: {
+            type: 'LineString',
+            coordinates: YOSEMITE_BOUNDARY,
+          },
+        } as GeoJSON.Feature,
+        {
+          style: {
+            color: '#00FF88',
+            weight: 2,
+            opacity: 0.85,
+            dashArray: '8 4',
+          },
+          interactive: false,
+        }
+      ).addTo(map);
+
       // Single permanent click handler reads current mode from ref
       map.on('click', (e) => {
         const pos: LatLon = { lat: e.latlng.lat, lon: e.latlng.lng };
         if (modeRef.current === 'set-ambulance') onAmbulanceSetRef.current(pos);
         else if (modeRef.current === 'set-victim') onVictimSetRef.current(pos);
+      });
+
+      map.on('move', () => {
+        const c = map.getCenter();
+        onMoveRef.current?.(c.lat, c.lng, map.getZoom());
       });
 
       mapRef.current = map;
