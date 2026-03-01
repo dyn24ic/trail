@@ -8,7 +8,7 @@ import type { LatLon, HybridRoute } from "@/types/backend";
 import { YOSEMITE_BBOX } from "@/data/trailBbox";
 import { YOSEMITE_BOUNDARY, WORLD_RING } from "@/data/yosemiteBoundary";
 import { TRAIL_SEGMENTS } from "@/data/trailSegments";
-import type { DangerZone } from "@/types/backend";
+import type { DangerZone, ScalaSearchZone } from "@/types/backend";
 import type { HotspotPredictionResponse } from "@/types/hotspots";
 import type {
   BleScannerSuggestion,
@@ -17,6 +17,7 @@ import type {
 } from "@/types/markers";
 import { DRONE_CONFIGS, DRONE_SEARCH_DURATION_MS } from "@/data/dronePath";
 import type { DroneState, DroneSearchUpdate } from "@/data/dronePath";
+import type { TrackedHikerMarker } from "@/hooks/useHikerTracking";
 
 // ── Path interpolation helper ─────────────────────────────────────────────
 
@@ -96,9 +97,12 @@ interface MapboxSceneProps {
   bleScanners?: BleScannerSuggestion[];
   droneData?: DroneMarker[];
   incidentData?: IncidentMarker[];
+  searchZones?: ScalaSearchZone[];
+  victimMarkers?: { id: string; lat: number; lon: number }[];
   droneSearchActive?: boolean;
   onDroneUpdate?: (update: DroneSearchUpdate) => void;
   deviantHikers?: DeviantHikerMarker[];
+  trackedHikerMarkers?: TrackedHikerMarker[];
 }
 
 const CENTER_LAT = (YOSEMITE_BBOX.north + YOSEMITE_BBOX.south) / 2;
@@ -120,9 +124,12 @@ export default function MapboxScene({
   bleScanners = [],
   droneData = [],
   incidentData = [],
+  searchZones = [],
+  victimMarkers = [],
   droneSearchActive = false,
   onDroneUpdate,
   deviantHikers = [],
+  trackedHikerMarkers = [],
 }: MapboxSceneProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
@@ -140,6 +147,7 @@ export default function MapboxScene({
   const droneMarkerEls = useRef<mapboxgl.Marker[]>([]);
   const hubMarkerEls = useRef<mapboxgl.Marker[]>([]);
   const incidentMarkerEls = useRef<mapboxgl.Marker[]>([]);
+  const victimMarkerEls = useRef<mapboxgl.Marker[]>([]);
 
   // Hike mode refs
   const hikeModeRef = useRef(hikeMode ?? false);
@@ -536,7 +544,13 @@ export default function MapboxScene({
 
       const features = hotspotData.hotspots.map((h) => ({
         type: "Feature" as const,
-        properties: { risk_score: h.riskScore, risk_level: h.riskLevel },
+        properties: {
+          risk_score: h.riskScore,
+          risk_level: h.riskLevel,
+          incident_type: h.incidentType ?? "unknown",
+          description: h.description,
+          recommendations: JSON.stringify(h.recommendations ?? []),
+        },
         geometry: { type: "Point" as const, coordinates: [h.lon, h.lat] },
       }));
 
@@ -564,6 +578,36 @@ export default function MapboxScene({
         },
         layout: { visibility: layersRef.current.hotspots ? "visible" : "none" },
       });
+
+      map.on("click", "hotspots-circle", (e) => {
+        const props = e.features?.[0]?.properties;
+        if (!props) return;
+        const recs: string[] = JSON.parse(props.recommendations ?? "[]");
+        const typeLabel = (props.incident_type as string).replace(/_/g, " ").toUpperCase();
+        const levelColor: Record<string, string> = {
+          extreme: "#ef4444", high: "#f97316", moderate: "#eab308", low: "#22c55e",
+        };
+        const col = levelColor[props.risk_level as string] ?? "#ff8c42";
+        new mapboxgl.Popup({ closeButton: true, maxWidth: "280px" })
+          .setLngLat(e.lngLat)
+          .setHTML(
+            `<div style="font-family:monospace;font-size:11px;color:#dce8f0;background:#0d1a23;padding:10px 12px;border-radius:4px;">
+              <div style="color:${col};font-size:12px;font-weight:700;margin-bottom:4px;">
+                ▲ ${props.risk_level?.toUpperCase()} RISK
+              </div>
+              <div style="color:#94a3b8;font-size:10px;margin-bottom:6px;">
+                Type: <span style="color:#fbbf24;">${typeLabel}</span>
+                &nbsp;·&nbsp;Score: ${(props.risk_score as number).toFixed(2)}
+              </div>
+              <div style="margin-bottom:6px;line-height:1.4;">${props.description}</div>
+              ${recs.length > 0 ? `<div style="color:#94a3b8;margin-bottom:3px;">Recommendations:</div>
+              <ul style="margin:0;padding-left:14px;">${recs.map(r => `<li style="margin-bottom:2px;">${r}</li>`).join("")}</ul>` : ""}
+            </div>`,
+          )
+          .addTo(map);
+      });
+      map.on("mouseenter", "hotspots-circle", () => { map.getCanvas().style.cursor = "pointer"; });
+      map.on("mouseleave", "hotspots-circle", () => { map.getCanvas().style.cursor = ""; });
     };
 
     if (map.isStyleLoaded()) addHotspots();
@@ -831,6 +875,99 @@ export default function MapboxScene({
       m.getElement().style.display = show ? "" : "none";
     });
   }, [layers.incidents]);
+
+  // ── Search zone circles (predicted zones from active incidents) ───────────
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    const SRC = "search-zones-src";
+    const FILL = "search-zones-fill";
+    const LINE = "search-zones-line";
+
+    function circlePolygon(lat: number, lon: number, radiusMeters: number): [number, number][] {
+      const pts = 36;
+      const coords: [number, number][] = [];
+      for (let i = 0; i <= pts; i++) {
+        const angle = (i / pts) * 2 * Math.PI;
+        const dLat = (radiusMeters * Math.cos(angle)) / 111320;
+        const dLon = (radiusMeters * Math.sin(angle)) / (111320 * Math.cos((lat * Math.PI) / 180));
+        coords.push([lon + dLon, lat + dLat]);
+      }
+      return coords;
+    }
+
+    const features = searchZones.map((z, i) => ({
+      type: "Feature" as const,
+      properties: { confidence: z.confidence, index: i },
+      geometry: {
+        type: "Polygon" as const,
+        coordinates: [circlePolygon(z.lat, z.lng, z.radiusMeters)],
+      },
+    }));
+
+    const apply = () => {
+      if (map.getSource(SRC)) {
+        (map.getSource(SRC) as mapboxgl.GeoJSONSource).setData({ type: "FeatureCollection", features });
+        return;
+      }
+      map.addSource(SRC, { type: "geojson", data: { type: "FeatureCollection", features } });
+      map.addLayer({
+        id: FILL,
+        type: "fill",
+        source: SRC,
+        paint: { "fill-color": "#4A90D9", "fill-opacity": 0.15 },
+      });
+      map.addLayer({
+        id: LINE,
+        type: "line",
+        source: SRC,
+        paint: {
+          "line-color": "#4A90D9",
+          "line-width": 1.5,
+          "line-opacity": 0.7,
+          "line-dasharray": [3, 2],
+        },
+      });
+    };
+
+    if (map.isStyleLoaded()) apply();
+    else map.once("load", apply);
+  }, [searchZones, mapStyleLoaded]);
+
+  // ── Victim markers (drone-confirmed victim locations) ─────────────────────
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!mapStyleLoaded || !map) return;
+
+    victimMarkerEls.current.forEach((m) => m.remove());
+    victimMarkerEls.current = [];
+
+    victimMarkers.forEach((v) => {
+      const el = document.createElement("div");
+      el.style.cssText = "position:relative;width:28px;height:28px;cursor:pointer;";
+      el.innerHTML = `
+        <div style="position:absolute;inset:0;border-radius:50%;background:#ff3b3b;opacity:0.35;animation:incident-pulse 1s ease-out infinite;"></div>
+        <div style="position:absolute;inset:5px;border-radius:50%;background:#ff3b3b;border:2px solid #fff;"></div>
+        <div style="position:absolute;top:-16px;left:50%;transform:translateX(-50%);font-size:8px;color:#ff3b3b;white-space:nowrap;font-family:monospace;background:rgba(4,11,11,0.9);padding:1px 4px;border-radius:2px;letter-spacing:0.06em;">VICTIM</div>
+      `;
+      victimMarkerEls.current.push(
+        new mapboxgl.Marker({ element: el, anchor: "center" })
+          .setLngLat([v.lon, v.lat])
+          .setPopup(
+            new mapboxgl.Popup({ offset: 18, closeButton: false }).setHTML(
+              `<div style="font-family:monospace;font-size:11px;color:#b0d8c8;"><b style="color:#ff3b3b;">◉ VICTIM LOCATED</b><br/>Incident: ${v.id.slice(-8).toUpperCase()}</div>`,
+            ),
+          )
+          .addTo(map),
+      );
+    });
+
+    return () => {
+      victimMarkerEls.current.forEach((m) => m.remove());
+      victimMarkerEls.current = [];
+    };
+  }, [victimMarkers, mapStyleLoaded]);
 
   // ── Hybrid route layers (road + mountain gradient + stop + victim) ─────────
   useEffect(() => {
@@ -1326,6 +1463,106 @@ export default function MapboxScene({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [droneSearchActive, mapStyleLoaded]);
+
+  // ── Tracked hiker dots (all hikers: green on-track, red deviated) ─────────
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapStyleLoaded) return;
+
+    const SRC = "tracked-hikers-src";
+    const LAYER_GLOW = "tracked-hikers-glow";
+    const LAYER_DOT = "tracked-hikers-dot";
+    const LAYER_LABEL = "tracked-hikers-label";
+
+    const fc: GeoJSON.FeatureCollection = {
+      type: "FeatureCollection",
+      features: trackedHikerMarkers
+        .filter(h => h.lat != null && h.lon != null)
+        .map(h => ({
+          type: "Feature" as const,
+          properties: { name: h.name, color: h.color, deviated: h.deviated ? 1 : 0 },
+          geometry: { type: "Point" as const, coordinates: [h.lon, h.lat] },
+        })),
+    };
+
+    if (map.getSource(SRC)) {
+      (map.getSource(SRC) as mapboxgl.GeoJSONSource).setData(fc);
+      return;
+    }
+    if (fc.features.length === 0) return;
+
+    map.addSource(SRC, { type: "geojson", data: fc });
+    map.addLayer({
+      id: LAYER_GLOW,
+      type: "circle",
+      source: SRC,
+      paint: {
+        "circle-radius": 18,
+        "circle-color": ["get", "color"],
+        "circle-opacity": 0.2,
+        "circle-stroke-width": 0,
+      },
+    });
+    map.addLayer({
+      id: LAYER_DOT,
+      type: "circle",
+      source: SRC,
+      paint: {
+        "circle-radius": 7,
+        "circle-color": ["get", "color"],
+        "circle-opacity": 0.9,
+        "circle-stroke-width": 2,
+        "circle-stroke-color": "#ffffff",
+      },
+    });
+    map.addLayer({
+      id: LAYER_LABEL,
+      type: "symbol",
+      source: SRC,
+      layout: {
+        "text-field": ["get", "name"],
+        "text-size": 10,
+        "text-offset": [0, 1.8],
+        "text-anchor": "top",
+        "text-font": ["DIN Pro Medium", "Arial Unicode MS Regular"],
+      },
+      paint: {
+        "text-color": ["get", "color"],
+        "text-halo-color": "#040B0B",
+        "text-halo-width": 1.5,
+      },
+    });
+
+    return () => {
+      const m = mapRef.current;
+      if (!m) return;
+      try { m.removeLayer(LAYER_LABEL); } catch {}
+      try { m.removeLayer(LAYER_DOT); } catch {}
+      try { m.removeLayer(LAYER_GLOW); } catch {}
+      try { m.removeSource(SRC); } catch {}
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [trackedHikerMarkers.length, mapStyleLoaded]);
+
+  // Update tracked hiker positions when they move
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapStyleLoaded) return;
+    const SRC = "tracked-hikers-src";
+    if (!map.getSource(SRC)) return;
+
+    const fc: GeoJSON.FeatureCollection = {
+      type: "FeatureCollection",
+      features: trackedHikerMarkers
+        .filter(h => h.lat != null && h.lon != null)
+        .map(h => ({
+          type: "Feature" as const,
+          properties: { name: h.name, color: h.color, deviated: h.deviated ? 1 : 0 },
+          geometry: { type: "Point" as const, coordinates: [h.lon, h.lat] },
+        })),
+    };
+    (map.getSource(SRC) as mapboxgl.GeoJSONSource).setData(fc);
+  }, [trackedHikerMarkers, mapStyleLoaded]);
 
   // ── Deviant hiker alert dot ───────────────────────────────────────────────
   useEffect(() => {

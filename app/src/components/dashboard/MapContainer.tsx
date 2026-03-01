@@ -4,12 +4,11 @@ import { useState, useEffect, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import type mapboxgl from 'mapbox-gl';
 import { usePredictHotspots } from '@/lib/hotspots/usePredictHotspots';
-import { useIncidents } from '@/lib/incidents/useIncidents';
+import { useIncidents, useActiveIncidentDetails } from '@/lib/incidents/useIncidents';
 import { YOSEMITE_BBOX } from '@/data/trailBbox';
 import type { DangerZone, IncidentSummary, LatLon } from '@/types/backend';
 import type { IncidentMarker } from '@/types/markers';
 import { droneData } from '@/data/drones';
-import { incidentData as staticIncidentData } from '@/data/incidents';
 import { useHybridRoute } from '@/hooks/useHybridRoute';
 import RouteAnalysisPanel from './RouteAnalysisPanel';
 import type { RoutingMode } from './LeafletMapView';
@@ -19,7 +18,7 @@ import { useSensorSuggestions } from '@/hooks/useSensorSuggestions';
 import DroneFlightPanel from './DroneFlightPanel';
 import type { DroneSearchUpdate } from '@/data/dronePath';
 import HikerAlertPanel from './HikerAlertPanel';
-import type { DeviantHiker } from '@/hooks/useHikerTracking';
+import type { DeviantHiker, TrackedHikerMarker } from '@/hooks/useHikerTracking';
 
 // ── Coordinate utilities ───────────────────────────────────────────────────
 
@@ -138,9 +137,10 @@ const tbBtnOn: React.CSSProperties = {
 interface MapContainerProps {
   onMapMove?: (lat: number, lon: number) => void;
   deviantHikers?: DeviantHiker[];
+  trackedHikerMarkers?: TrackedHikerMarker[];
 }
 
-export default function MapContainer({ onMapMove, deviantHikers = [] }: MapContainerProps) {
+export default function MapContainer({ onMapMove, deviantHikers = [], trackedHikerMarkers = [] }: MapContainerProps) {
   const [sharedView, setSharedView] = useState({ lat: 37.74, lon: -119.58, zoom: 11 });
   const [mapboxFlyTo, setMapboxFlyTo] = useState<{ lat: number; lon: number; zoom: number; v: number } | null>(null);
   const [layers, setLayers] = useState({
@@ -163,9 +163,12 @@ export default function MapContainer({ onMapMove, deviantHikers = [] }: MapConta
   const [droneSearchActive, setDroneSearchActive] = useState(false);
   const [droneUpdate, setDroneUpdate] = useState<DroneSearchUpdate | null>(null);
   const [alertDismissed, setAlertDismissed] = useState(false);
+  const [environmentAlert, setEnvironmentAlert] = useState<string | null>(null);
   const mapboxMapRef = useRef<mapboxgl.Map | null>(null);
   const prevDeviantIdsRef = useRef<string>('');
   const hikeNodeIdxRef = useRef(0);
+  const seenIncidentIdsRef = useRef<Set<string>>(new Set());
+  const prevSearchingIdsRef = useRef<Set<string>>(new Set());
 
   const hotspots = usePredictHotspots(YOSEMITE_BBOX);
   const { status: scanStatus, scanners, load: loadScanners, clear: clearScanners } = useSensorSuggestions();
@@ -182,10 +185,17 @@ export default function MapContainer({ onMapMove, deviantHikers = [] }: MapConta
   } = useHybridRoute();
 
   const { incidents } = useIncidents();
-  const allIncidentMarkers: IncidentMarker[] = [
-    ...staticIncidentData,
-    ...incidents.map(toIncidentMarker).filter((m): m is IncidentMarker => m !== null),
-  ];
+  const activeDetails = useActiveIncidentDetails();
+
+  const allIncidentMarkers: IncidentMarker[] = incidents
+    .map(toIncidentMarker)
+    .filter((m): m is IncidentMarker => m !== null);
+
+  const activeSearchZones = activeDetails.flatMap(inc => inc.searchZones ?? []);
+
+  const activeVictimMarkers = activeDetails
+    .filter(inc => inc.droneResult?.victimFound && inc.droneResult.victimLat != null && inc.droneResult.victimLng != null)
+    .map(inc => ({ id: inc.id, lat: inc.droneResult!.victimLat!, lon: inc.droneResult!.victimLng! }));
 
   const toggle = (name: keyof typeof layers) => {
     setLayers(prev => ({ ...prev, [name]: !prev[name] }));
@@ -203,6 +213,57 @@ export default function MapContainer({ onMapMove, deviantHikers = [] }: MapConta
       if (ids !== '') setAlertDismissed(false);
     }
   }, [deviantHikers]);
+
+  // Auto-fly camera to new incident location
+  useEffect(() => {
+    for (const inc of incidents) {
+      if (!seenIncidentIdsRef.current.has(inc.id) && inc.locationLat != null && inc.locationLng != null) {
+        seenIncidentIdsRef.current.add(inc.id);
+        setMapboxFlyTo({ lat: inc.locationLat, lon: inc.locationLng, zoom: 14, v: Date.now() });
+        break; // fly to first new incident only
+      }
+    }
+    // Mark all as seen
+    incidents.forEach(inc => seenIncidentIdsRef.current.add(inc.id));
+  }, [incidents]);
+
+  // Auto-start drone SAR when any incident reaches "Searching" status
+  useEffect(() => {
+    const searchingIds = new Set(activeDetails.filter(inc => inc.status === 'Searching').map(inc => inc.id));
+    // Check for newly searching incidents
+    for (const id of searchingIds) {
+      if (!prevSearchingIdsRef.current.has(id)) {
+        setDroneSearchActive(true);
+        setViewMode('3d');
+        setLayers(prev => ({ ...prev, osm: false }));
+        break;
+      }
+    }
+    prevSearchingIdsRef.current = searchingIds;
+  }, [activeDetails]);
+
+  // Auto-stop drone SAR and set victim position when drone finds victim
+  useEffect(() => {
+    if (droneUpdate?.victimFound && droneUpdate.victimLat != null && droneUpdate.victimLon != null) {
+      // Auto-set victim position for route planning
+      setVictim({ lat: droneUpdate.victimLat, lon: droneUpdate.victimLon });
+      // Stop drone search after a brief delay so user sees the "found" state
+      const t = setTimeout(() => setDroneSearchActive(false), 3000);
+      return () => clearTimeout(t);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [droneUpdate?.victimFound]);
+
+  // Detect landslide: multiple incidents triggered within short window → environment alert
+  useEffect(() => {
+    const recentIncidents = incidents.filter(inc => {
+      const age = Date.now() - new Date(inc.createdAt).getTime();
+      return age < 30000 && inc.status === 'Triggered'; // within last 30s
+    });
+    if (recentIncidents.length >= 3 && !environmentAlert) {
+      setEnvironmentAlert('HAZARD: LANDSLIDE DETECTED — TRAIL CLOSURES ACTIVE');
+    }
+  }, [incidents, environmentAlert]);
 
   useEffect(() => {
     const { west, south, east, north } = YOSEMITE_BBOX;
@@ -539,9 +600,12 @@ export default function MapContainer({ onMapMove, deviantHikers = [] }: MapConta
           bleScanners={scanners}
           droneData={droneData}
           incidentData={allIncidentMarkers}
+          searchZones={activeSearchZones}
+          victimMarkers={activeVictimMarkers}
           droneSearchActive={droneSearchActive}
           onDroneUpdate={setDroneUpdate}
           deviantHikers={deviantHikers.map(d => ({ id: d.id, name: d.name, lat: d.lat, lon: d.lon }))}
+          trackedHikerMarkers={trackedHikerMarkers}
         />
       </div>
 
@@ -608,6 +672,30 @@ export default function MapContainer({ onMapMove, deviantHikers = [] }: MapConta
           deviants={deviantHikers}
           onDismiss={() => setAlertDismissed(true)}
         />
+      )}
+
+      {/* ── Environment hazard banner ───────────────────────────────── */}
+      {environmentAlert && (
+        <div style={{
+          position: 'absolute', top: 12, left: '50%', transform: 'translateX(-50%)',
+          zIndex: 860, pointerEvents: 'auto',
+          background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.6)',
+          borderRadius: '6px', padding: '10px 20px',
+          display: 'flex', alignItems: 'center', gap: '12px',
+          backdropFilter: 'blur(8px)',
+          fontFamily: 'monospace', fontSize: '11px', letterSpacing: '0.06em',
+          color: '#ef4444', whiteSpace: 'nowrap',
+        }}>
+          <span style={{ fontSize: '16px' }}>⚠</span>
+          {environmentAlert}
+          <button
+            onClick={() => setEnvironmentAlert(null)}
+            style={{
+              background: 'none', border: 'none', color: '#ef4444',
+              cursor: 'pointer', fontSize: '14px', padding: '0 4px',
+            }}
+          >×</button>
+        </div>
       )}
 
       {/* Computing spinner */}

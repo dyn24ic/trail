@@ -102,7 +102,10 @@ BREV_API_KEY       = os.getenv('BREV_API_KEY', '')
 # Set XGBOOST_MODEL_DIR to the directory containing:
 #   hotspot_model.json, incident_type_model.json, label_encoder.json
 # (produced by backend/training/04_xgboost/train_xgboost.py)
-XGBOOST_MODEL_DIR = os.getenv('XGBOOST_MODEL_DIR', '')
+XGBOOST_MODEL_DIR = os.getenv(
+    'XGBOOST_MODEL_DIR',
+    str(BASE_DIR / 'training' / '04_xgboost' / 'models'),
+)
 
 # DEM tile cache directory
 DEM_CACHE_DIR = BASE_DIR / 'dem_cache'

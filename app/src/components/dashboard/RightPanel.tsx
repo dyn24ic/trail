@@ -1,11 +1,13 @@
 'use client';
 
+import { useState } from 'react';
 import { useIncidents } from '@/lib/incidents/useIncidents';
 import type { IncidentSummary, IncidentStatus } from '@/types/backend';
 import type { DashboardLayout } from '@/hooks/useDashboardLayout';
 import type { Tab } from '@/hooks/useTabs';
 import type { HikerState } from '@/hooks/useHikerTracking';
 import HikerTrackingPanel from './HikerTrackingPanel';
+import IncidentDetailView from './views/IncidentDetailView';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -46,11 +48,14 @@ const TABS: { id: DashboardLayout['rightTab']; label: string }[] = [
 
 export default function RightPanel({ rightTab, setRightTab, openTab, hikerStates }: RightPanelProps) {
   const { incidents } = useIncidents();
+  const [archivedIds, setArchivedIds] = useState<Set<string>>(new Set());
+  const [selectedIncidentId, setSelectedIncidentId] = useState<string | null>(null);
   const deviantCount = hikerStates.filter(s => s.deviated).length;
-  const sorted = [...incidents].sort(
+  const visible = incidents.filter(i => !archivedIds.has(i.id));
+  const sorted = [...visible].sort(
     (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
   );
-  const openCount = incidents.filter(i => i.status !== 'Closed').length;
+  const openCount = visible.filter(i => i.status !== 'Closed').length;
 
   return (
     <aside className="sidebar sidebar--right">
@@ -80,12 +85,37 @@ export default function RightPanel({ rightTab, setRightTab, openTab, hikerStates
       {/* Tab content */}
       <div className="sidebar-content">
         {rightTab === 'active' && (
-          <ActiveTab
-            incidents={sorted}
-            openCount={openCount}
-            openTab={openTab}
-            onOpenAnalytics={() => openTab({ id: 'analytics', title: '◈ Analytics', type: 'analytics', closeable: true })}
-          />
+          selectedIncidentId ? (
+            <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+              <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--db-border2)', flexShrink: 0 }}>
+                <button
+                  onClick={() => setSelectedIncidentId(null)}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: 'var(--db-muted)',
+                    cursor: 'pointer',
+                    fontSize: '0.62rem',
+                    letterSpacing: '0.08em',
+                    padding: '2px 0',
+                  }}
+                >
+                  ← Back to list
+                </button>
+              </div>
+              <div style={{ flex: 1, overflowY: 'auto' }}>
+                <IncidentDetailView incidentId={selectedIncidentId} />
+              </div>
+            </div>
+          ) : (
+            <ActiveTab
+              incidents={sorted}
+              openCount={openCount}
+              onOpenAnalytics={() => openTab({ id: 'analytics', title: '◈ Analytics', type: 'analytics', closeable: true })}
+              onArchiveAll={() => setArchivedIds(prev => new Set([...prev, ...incidents.map(i => i.id)]))}
+              onOpenDetail={setSelectedIncidentId}
+            />
+          )
         )}
         {rightTab === 'ai' && <AITab />}
         {rightTab === 'hikers' && <HikerTrackingPanel hikerStates={hikerStates} />}
@@ -99,23 +129,16 @@ export default function RightPanel({ rightTab, setRightTab, openTab, hikerStates
 function ActiveTab({
   incidents,
   openCount,
-  openTab,
   onOpenAnalytics,
+  onArchiveAll,
+  onOpenDetail,
 }: {
   incidents: IncidentSummary[];
   openCount: number;
-  openTab: (tab: Tab) => void;
   onOpenAnalytics: () => void;
+  onArchiveAll: () => void;
+  onOpenDetail: (id: string) => void;
 }) {
-  function handleOpenDetail(inc: IncidentSummary) {
-    openTab({
-      id: `incident-${inc.id}`,
-      title: `#${inc.id.slice(-4).toUpperCase()}`,
-      type: 'incident',
-      closeable: true,
-      data: { incidentId: inc.id },
-    });
-  }
 
   return (
     <div style={{ flex: 1, overflowY: 'auto' }}>
@@ -124,6 +147,25 @@ function ActiveTab({
         <span className="panel-badge" style={openCount > 0 ? { color: 'var(--db-red)' } : {}}>
           {openCount} Open
         </span>
+        {incidents.length > 0 && (
+          <button
+            onClick={onArchiveAll}
+            style={{
+              marginLeft: 'auto',
+              padding: '2px 8px',
+              background: 'rgba(255,80,80,0.08)',
+              border: '1px solid rgba(255,80,80,0.3)',
+              color: '#FF5050',
+              borderRadius: '2px',
+              fontSize: '0.55rem',
+              letterSpacing: '0.1em',
+              textTransform: 'uppercase',
+              cursor: 'pointer',
+            }}
+          >
+            Archive All
+          </button>
+        )}
       </div>
 
       {incidents.length === 0 ? (
@@ -180,7 +222,7 @@ function ActiveTab({
                     ? 'action-green'
                     : 'action-amber'
                 }`}
-                onClick={() => handleOpenDetail(inc)}
+                onClick={() => onOpenDetail(inc.id)}
               >
                 Open Detail →
               </button>

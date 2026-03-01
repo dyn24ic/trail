@@ -71,6 +71,9 @@ class IncidentRepository(xa: Transactor[IO]):
       )
     """.update.run.transact(xa).void
 
+  def deleteAll: IO[Int] =
+    sql"DELETE FROM incidents".update.run.transact(xa)
+
   // Doobie 1.x / Scala 3 handles nested tuples more reliably for large row widths.
   private type RowA = (String, String, String, String, Option[Double], Option[Double])
   private type RowB = (Option[String], Option[String], Option[String], Option[String])
@@ -106,6 +109,13 @@ class IncidentRepository(xa: Transactor[IO]):
       .to[List]
       .transact(xa)
       .map(_.map(fromRow))
+
+  def patchStatus(id: String, newStatus: IncidentStatus, updatedAt: String): IO[Boolean] =
+    val statusStr = newStatus.toString
+    sql"""
+      UPDATE incidents SET status = $statusStr, updated_at = $updatedAt
+      WHERE id = $id
+    """.update.run.transact(xa).map(_ > 0)
 
   def updateFull(incident: Incident): IO[Unit] =
     val statusStr = incident.status.toString

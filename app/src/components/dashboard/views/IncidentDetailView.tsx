@@ -71,6 +71,21 @@ export default function IncidentDetailView({
   const [incident, setIncident] = useState<Incident | null>(null);
   const [loading, setLoading] = useState(false);
   const [aiLoading, setAiLoading] = useState(false);
+  const [advancing, setAdvancing] = useState(false);
+
+  const advanceStage = async () => {
+    if (!incidentId) return;
+    setAdvancing(true);
+    try {
+      const res = await fetch(`/api/incidents/${incidentId}/advance`, { method: 'POST' });
+      if (res.ok) {
+        const data: Incident = await res.json();
+        setIncident(data);
+      }
+    } finally {
+      setAdvancing(false);
+    }
+  };
 
   useEffect(() => {
     if (!incidentId) return;
@@ -198,6 +213,38 @@ export default function IncidentDetailView({
           📍 {fmtCoord(inc.locationLat)}, {fmtCoord(inc.locationLng)} ·{" "}
           {fmtTime(inc.createdAt)}
         </div>
+        {inc.status !== 'Closed' && (() => {
+          const stageActionLabel: Record<IncidentStatus, string> = {
+            Triggered:   '▶ Predict Search Zones',
+            Searching:   '▶ Deploy Drone Scan',
+            VictimFound: '▶ Run Triage',
+            Triaged:     '▶ Plan Responder Route',
+            Routed:      '▶ Generate Report & Close',
+            Closed:      '',
+          };
+          return (
+            <div style={{ padding: '8px 20px 4px', display: 'flex', gap: '6px', alignItems: 'center' }}>
+              <button
+                onClick={advanceStage}
+                disabled={advancing}
+                style={{
+                  background: advancing ? 'rgba(255,255,255,0.04)' : `${accentColor}18`,
+                  border: `1px solid ${accentColor}`,
+                  color: accentColor,
+                  fontFamily: "'Share Tech Mono', monospace",
+                  fontSize: '0.6rem',
+                  padding: '5px 12px',
+                  cursor: advancing ? 'not-allowed' : 'pointer',
+                  opacity: advancing ? 0.6 : 1,
+                  letterSpacing: '0.05em',
+                  borderRadius: '2px',
+                }}
+              >
+                {advancing ? '↻ Running…' : stageActionLabel[inc.status]}
+              </button>
+            </div>
+          );
+        })()}
       </div>
 
       {/* Search Zones */}
@@ -839,7 +886,12 @@ function AiRecommendationSection({
     <div className="panel-section">
       <div className="panel-heading">
         <span className="panel-title">AI Recommendation</span>
-        {!recommendation && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          {recommendation && (
+            <span style={{ fontSize: '0.55rem', color: 'var(--db-muted)', letterSpacing: '0.06em' }}>
+              {recommendation.modelUsed}
+            </span>
+          )}
           <button
             onClick={onGenerate}
             disabled={loading}
@@ -853,17 +905,11 @@ function AiRecommendationSection({
               cursor: loading ? "wait" : "pointer",
             }}
           >
-            {loading ? "↻ Generating…" : "⚡ Generate"}
+            {loading ? '↻ Generating…' : recommendation ? '↺ Regenerate' : '⚡ Generate'}
           </button>
-        )}
+        
         {recommendation && (
-          <span
-            style={{
-              fontSize: "0.55rem",
-              color: "var(--db-muted)",
-              letterSpacing: "0.06em",
-            }}
-          >
+          <span style={{ fontSize: '0.55rem', color: 'var(--db-muted)', letterSpacing: '0.06em' }}>
             {recommendation.modelUsed}
           </span>
         )}

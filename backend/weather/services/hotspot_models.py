@@ -14,6 +14,11 @@ import random
 from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
 
+_INCIDENT_TYPES = [
+    "fall", "drowning", "medical", "vehicle", "rockfall",
+    "lightning", "search_rescue", "fire_related", "unknown",
+]
+
 # ---------------------------------------------------------------------------
 # Context passed to models that need environmental data
 # ---------------------------------------------------------------------------
@@ -93,6 +98,7 @@ class RandomHotspotModel:
                 "radiusMeters": random.randint(100, 800),
                 "riskScore":    risk_score,
                 "riskLevel":    risk_level,
+                "incidentType": random.choice(_INCIDENT_TYPES),
                 "factors": {
                     "fire":          round(random.uniform(0.1, 0.9), 3),
                     "weather":       round(random.uniform(0.1, 0.9), 3),
