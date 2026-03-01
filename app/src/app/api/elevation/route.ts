@@ -12,7 +12,7 @@ export async function GET(req: NextRequest) {
   const north = parseFloat(searchParams.get('north') ?? '37.82');
   const west  = parseFloat(searchParams.get('west')  ?? '-119.62');
   const east  = parseFloat(searchParams.get('east')  ?? '-119.47');
-  const res   = Math.min(256, Math.max(8, parseInt(searchParams.get('res') ?? '140', 10)));
+  const res   = Math.min(512, Math.max(8, parseInt(searchParams.get('res') ?? '256', 10)));
 
   const bbox: BBox = { south, north, west, east };
 

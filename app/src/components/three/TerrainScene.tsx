@@ -1158,61 +1158,89 @@ export default function TerrainScene({
       const maxElev = Math.max(...elevs);
       const elevRange = maxElev - minElev || 1;
 
-      // Map waypoints to 3D positions; clamp to bbox so off-Yosemite routes still render on terrain edge
-      const points3D = wps.map((wp) => {
-        const clampedLat = Math.max(YOSEMITE_BBOX.south, Math.min(YOSEMITE_BBOX.north, wp.lat));
-        const clampedLon = Math.max(YOSEMITE_BBOX.west,  Math.min(YOSEMITE_BBOX.east,  wp.lon));
-        const { x, z } = latLonToMesh(clampedLat, clampedLon, YOSEMITE_BBOX, SZ_W, SZ_H);
-        const y = surf(x, z) + 0.3;
-        return new THREE.Vector3(x, y, z);
+      // Map waypoints to 3D positions on terrain surface
+      const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+      const wpMesh = wps.map((wp) => {
+        const { x, z } = latLonToMesh(
+          clamp(wp.lat, YOSEMITE_BBOX.south, YOSEMITE_BBOX.north),
+          clamp(wp.lon, YOSEMITE_BBOX.west,  YOSEMITE_BBOX.east),
+          YOSEMITE_BBOX, SZ_W, SZ_H,
+        );
+        return { x, z };
       });
 
-      // Draw per-segment coloured tubes — thicker (0.09) so they're clearly visible
-      for (let i = 0; i < points3D.length - 1; i++) {
-        const t = (elevs[i] - minElev) / elevRange;
-        const [r, g, b] = elevColour(t);
+      // Scale tube and marker size with end-to-end route span
+      const p0 = wpMesh[0], pN = wpMesh[wps.length - 1];
+      const routeSpan = Math.hypot(pN.x - p0.x, pN.z - p0.z);
+      const tubeRadius   = Math.max(0.06, Math.min(0.18,  routeSpan * 0.025));
+      const markerRadius = Math.max(0.12, Math.min(0.35,  routeSpan * 0.075));
+      const surfOffset   = Math.max(0.18, tubeRadius * 2); // keeps tube clearly above terrain
+
+      // Dense terrain-following subdivision: sample terrain height every ~SUBDIV steps
+      // so the tube never cuts through terrain between sparse backend waypoints
+      const SUBDIV = 10;
+      type SubPt = { x: number; y: number; z: number; t: number }; // t = elevation colour [0,1]
+      const subPts: SubPt[] = [];
+
+      for (let i = 0; i < wps.length - 1; i++) {
+        const ax = wpMesh[i].x,   az = wpMesh[i].z;
+        const bx = wpMesh[i+1].x, bz = wpMesh[i+1].z;
+        const t0 = (elevs[i]   - minElev) / elevRange;
+        const t1 = (elevs[i+1] - minElev) / elevRange;
+        for (let s = 0; s < SUBDIV; s++) {
+          const frac = s / SUBDIV;
+          const x = ax + (bx - ax) * frac;
+          const z = az + (bz - az) * frac;
+          const y = surf(x, z) + surfOffset;
+          subPts.push({ x, y, z, t: t0 + (t1 - t0) * frac });
+        }
+      }
+      // Always include the final waypoint
+      const lastMesh = wpMesh[wps.length - 1];
+      subPts.push({
+        x: lastMesh.x,
+        y: surf(lastMesh.x, lastMesh.z) + surfOffset,
+        z: lastMesh.z,
+        t: (elevs[wps.length - 1] - minElev) / elevRange,
+      });
+
+      // Draw one small LineCurve3 tube per sub-segment (gives colour gradient + terrain following)
+      for (let i = 0; i < subPts.length - 1; i++) {
+        const sp = subPts[i];
+        const [r, g, b] = elevColour(sp.t);
         const color = new THREE.Color(r / 255, g / 255, b / 255);
-        const segCurve = new THREE.LineCurve3(points3D[i], points3D[i + 1]);
-        const tube = new THREE.TubeGeometry(segCurve, 2, 0.09, 6, false);
-        const mat = new THREE.MeshBasicMaterial({ color, transparent: false });
-        activeRouteGroup.add(new THREE.Mesh(tube, mat));
+        const segCurve = new THREE.LineCurve3(
+          new THREE.Vector3(sp.x, sp.y, sp.z),
+          new THREE.Vector3(subPts[i+1].x, subPts[i+1].y, subPts[i+1].z),
+        );
+        const tube = new THREE.TubeGeometry(segCurve, 2, tubeRadius, 8, false);
+        activeRouteGroup.add(new THREE.Mesh(tube, new THREE.MeshBasicMaterial({ color })));
       }
 
       // Victim marker (red sphere) at route end
-      const last = wps[wps.length - 1];
-      const lastClamped = {
-        lat: Math.max(YOSEMITE_BBOX.south, Math.min(YOSEMITE_BBOX.north, last.lat)),
-        lon: Math.max(YOSEMITE_BBOX.west,  Math.min(YOSEMITE_BBOX.east,  last.lon)),
-      };
-      const { x: vx, z: vz } = latLonToMesh(lastClamped.lat, lastClamped.lon, YOSEMITE_BBOX, SZ_W, SZ_H);
-      const vy = surf(vx, vz) + 0.35;
+      const { x: vx, z: vz } = lastMesh;
+      const vy = surf(vx, vz) + markerRadius * 1.2;
       const victimSphere = new THREE.Mesh(
-        new THREE.SphereGeometry(0.28, 12, 12),
+        new THREE.SphereGeometry(markerRadius, 14, 14),
         new THREE.MeshBasicMaterial({ color: 0xff2222 }),
       );
       victimSphere.position.set(vx, vy, vz);
       activeRouteGroup.add(victimSphere);
 
       // Stop point marker (orange sphere) at route start
-      const first = wps[0];
-      const firstClamped = {
-        lat: Math.max(YOSEMITE_BBOX.south, Math.min(YOSEMITE_BBOX.north, first.lat)),
-        lon: Math.max(YOSEMITE_BBOX.west,  Math.min(YOSEMITE_BBOX.east,  first.lon)),
-      };
-      const { x: sx, z: sz } = latLonToMesh(firstClamped.lat, firstClamped.lon, YOSEMITE_BBOX, SZ_W, SZ_H);
-      const sy = surf(sx, sz) + 0.35;
+      const { x: sx, z: sz } = wpMesh[0];
+      const sy = surf(sx, sz) + markerRadius * 1.2;
       const stopSphere = new THREE.Mesh(
-        new THREE.SphereGeometry(0.22, 12, 12),
+        new THREE.SphereGeometry(markerRadius * 0.8, 14, 14),
         new THREE.MeshBasicMaterial({ color: 0xf97316 }),
       );
       stopSphere.position.set(sx, sy, sz);
       activeRouteGroup.add(stopSphere);
 
       // Auto-focus camera on the midpoint of the route at a good viewing angle
-      const mid = points3D[Math.floor(points3D.length / 2)];
-      // Estimate a view distance proportional to route length
-      const routeSpan = points3D[0].distanceTo(points3D[points3D.length - 1]);
-      const viewDist = Math.max(3, Math.min(12, routeSpan * 0.8));
+      const mid3 = subPts[Math.floor(subPts.length / 2)];
+      const mid = new THREE.Vector3(mid3.x, mid3.y, mid3.z);
+      const viewDist = Math.max(1.5, Math.min(12, routeSpan * 0.8));
       focusTween = {
         fromPos: camera.position.clone(),
         fromTarget: controls.target.clone(),
@@ -1664,6 +1692,8 @@ export default function TerrainScene({
           rebuildBoundary();
           repositionSurface();
         }
+        // Force route rebuild so terrain-following surf() uses the new heights
+        prevActiveRouteWpCount = -1;
         const badge = document.getElementById("source-badge");
         if (badge) {
           badge.className = `source-badge ${elev.source}`;

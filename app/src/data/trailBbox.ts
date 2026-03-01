@@ -18,4 +18,4 @@ const MESH_SCALE = 20; // world units for the longest axis
 export const MESH_WIDTH  = MESH_SCALE * lonSpanKm / longerKm; // Three.js X (east-west)
 export const MESH_HEIGHT = MESH_SCALE * latSpanKm / longerKm; // Three.js Z (north-south)
 export const MESH_SIZE   = MESH_SCALE; // kept for any legacy references
-export const MESH_RES    = 140;        // vertices per side
+export const MESH_RES    = 256;        // vertices per side
