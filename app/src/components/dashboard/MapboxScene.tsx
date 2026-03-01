@@ -1114,6 +1114,8 @@ export default function MapboxScene({
   }, [hikeWaypoints]);
 
   // ── Drone SAR animation (RAF loop) ───────────────────────────────────────
+  const DRONE_AGL = 220; // metres above visual terrain (exaggerated)
+
   useEffect(() => {
     if (!droneSearchActive || !mapStyleLoaded) return;
     const map = mapRef.current;
@@ -1123,6 +1125,28 @@ export default function MapboxScene({
     DRONE_CONFIGS.forEach((cfg) => {
       if (map.getSource(`drone-pos-${cfg.id}`)) return;
       const startCoord = cfg.path[0];
+
+      // Ground shadow source (2D — stays on terrain surface)
+      map.addSource(`drone-shadow-${cfg.id}`, {
+        type: "geojson",
+        data: {
+          type: "Feature",
+          geometry: { type: "Point", coordinates: startCoord },
+          properties: {},
+        },
+      });
+      map.addLayer({
+        id: `drone-shadow-${cfg.id}`,
+        type: "circle",
+        source: `drone-shadow-${cfg.id}`,
+        paint: {
+          "circle-radius": 9,
+          "circle-color": "#000000",
+          "circle-opacity": 0.35,
+          "circle-stroke-width": 0,
+        },
+      });
+
       map.addSource(`drone-pos-${cfg.id}`, {
         type: "geojson",
         data: {
@@ -1179,8 +1203,20 @@ export default function MapboxScene({
         const isFound =
           cfg.victimAtProgress != null && globalT >= cfg.victimAtProgress;
 
+        const terrainElev =
+          map.queryTerrainElevation([pos.lon, pos.lat], { exaggerated: true }) ?? 0;
         (
           map.getSource(`drone-pos-${cfg.id}`) as mapboxgl.GeoJSONSource
+        )?.setData({
+          type: "Feature",
+          geometry: {
+            type: "Point",
+            coordinates: [pos.lon, pos.lat, terrainElev + DRONE_AGL],
+          },
+          properties: {},
+        });
+        (
+          map.getSource(`drone-shadow-${cfg.id}`) as mapboxgl.GeoJSONSource
         )?.setData({
           type: "Feature",
           geometry: { type: "Point", coordinates: [pos.lon, pos.lat] },
@@ -1273,6 +1309,12 @@ export default function MapboxScene({
         } catch {}
         try {
           map.removeSource(`drone-pos-${cfg.id}`);
+        } catch {}
+        try {
+          map.removeLayer(`drone-shadow-${cfg.id}`);
+        } catch {}
+        try {
+          map.removeSource(`drone-shadow-${cfg.id}`);
         } catch {}
       });
       try {

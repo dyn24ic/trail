@@ -81,7 +81,7 @@ export default function HikerTrackingPanel({ hikerStates }: HikerTrackingPanelPr
                 fontWeight: 'bold',
                 letterSpacing: '0.04em',
               }}>
-                {hiker.name}
+                {hiker.mac}
               </span>
               <span style={{
                 fontSize: '0.58rem',
@@ -99,7 +99,7 @@ export default function HikerTrackingPanel({ hikerStates }: HikerTrackingPanelPr
               marginBottom: '7px',
               letterSpacing: '0.03em',
             }}>
-              {hiker.mac} · {hiker.trail}
+              {hiker.trail}
             </div>
 
             {/* Sensor pip row */}

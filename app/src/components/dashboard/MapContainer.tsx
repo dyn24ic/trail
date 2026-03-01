@@ -153,7 +153,6 @@ export default function MapContainer({ onMapMove, deviantHikers = [] }: MapConta
   });
   const [viewMode, setViewMode] = useState<'3d' | '2d'>('3d');
   const [focusMode, setFocusMode] = useState(false);
-  const [boxZoomMode, setBoxZoomMode] = useState(false);
   const [dangerZones, setDangerZones] = useState<DangerZone[]>([]);
   const [routingMode, setRoutingMode] = useState<RoutingMode>('view');
   const [severity, setSeverity] = useState(3);
@@ -526,7 +525,6 @@ export default function MapContainer({ onMapMove, deviantHikers = [] }: MapConta
           hotspotData={hotspots.data}
           hybridRoute={hybridRoute}
           onMove={handleMapboxMove}
-          boxZoomMode={boxZoomMode && !hikeMode}
           flyTo={mapboxFlyTo}
           hikeMode={hikeMode}
           hikeWaypoints={hikeWaypoints}
@@ -626,24 +624,6 @@ export default function MapContainer({ onMapMove, deviantHikers = [] }: MapConta
         </div>
       )}
 
-      {/* Box-zoom toggle (3D only) */}
-      {viewMode === '3d' && (
-        <button
-          onClick={() => setBoxZoomMode(v => !v)}
-          style={{
-            position: 'absolute', top: '12px', right: '12px',
-            padding: '6px 12px',
-            background: boxZoomMode ? 'rgba(0,255,200,0.18)' : 'rgba(4,11,11,0.75)',
-            border: `1.5px solid ${boxZoomMode ? 'rgba(0,255,200,0.9)' : 'rgba(0,255,200,0.3)'}`,
-            color: boxZoomMode ? '#00ffc8' : '#7ab8b0',
-            borderRadius: '4px', fontSize: '11px', fontFamily: 'monospace',
-            letterSpacing: '0.05em', cursor: 'pointer', backdropFilter: 'blur(4px)',
-            zIndex: 10, userSelect: 'none',
-          }}
-        >
-          {boxZoomMode ? '⬚ ZOOM ON' : '⬚ BOX ZOOM'}
-        </button>
-      )}
 
       {/* Scan indicator */}
       <div className="scan-indicator">
