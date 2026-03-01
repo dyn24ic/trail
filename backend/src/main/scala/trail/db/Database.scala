@@ -33,10 +33,16 @@ object Database:
       drone_result     TEXT,
       triage           TEXT,
       route            TEXT,
-      created_at       TEXT NOT NULL,
-      updated_at       TEXT NOT NULL,
-      report           TEXT
+      created_at        TEXT NOT NULL,
+      updated_at        TEXT NOT NULL,
+      report            TEXT,
+      external_reports  TEXT,
+      ai_recommendation TEXT
     )""".update.run).transact(xa).void >>
-    // Idempotent migration for existing databases that predate the report column
+    // Idempotent migrations for columns added after initial schema
     sql"ALTER TABLE incidents ADD COLUMN report TEXT"
+      .update.run.transact(xa).attempt.void >>
+    sql"ALTER TABLE incidents ADD COLUMN external_reports TEXT"
+      .update.run.transact(xa).attempt.void >>
+    sql"ALTER TABLE incidents ADD COLUMN ai_recommendation TEXT"
       .update.run.transact(xa).attempt.void

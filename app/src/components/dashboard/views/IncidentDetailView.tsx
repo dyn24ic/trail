@@ -1,7 +1,10 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import type { Incident, IncidentStatus, IncidentReport, TrailRecommendation } from '@/types/backend';
+import type {
+  Incident, IncidentStatus, IncidentReport, TrailRecommendation,
+  AiRecommendation, PoliceReport, AmbulanceReport,
+} from '@/types/backend';
 
 const STAGES: IncidentStatus[] = ['Triggered', 'Searching', 'VictimFound', 'Triaged', 'Routed', 'Closed'];
 const STAGE_LABELS: Record<IncidentStatus, string> = {
@@ -33,6 +36,7 @@ interface IncidentDetailViewProps {
 export default function IncidentDetailView({ incidentId }: IncidentDetailViewProps) {
   const [incident, setIncident] = useState<Incident | null>(null);
   const [loading, setLoading] = useState(false);
+  const [aiLoading, setAiLoading] = useState(false);
 
   useEffect(() => {
     if (!incidentId) return;
@@ -226,9 +230,284 @@ export default function IncidentDetailView({ incidentId }: IncidentDetailViewPro
 
       {/* Post-Mortem */}
       {inc.report && <PostMortemSection report={inc.report} />}
+
+      {/* External Reports + AI Recommendation (only after incident is Closed) */}
+      {inc.status === 'Closed' && (
+        <>
+          <ExternalReportsSection
+            incidentId={inc.id}
+            externalReports={inc.externalReports}
+            onSaved={(updated) => setIncident(prev => prev ? { ...prev, externalReports: updated } : prev)}
+          />
+          <AiRecommendationSection
+            incidentId={inc.id}
+            recommendation={inc.aiRecommendation}
+            loading={aiLoading}
+            onGenerate={async () => {
+              setAiLoading(true);
+              try {
+                const res = await fetch(`/api/incidents/${inc.id}/ai-recommendation`, { method: 'POST' });
+                if (res.ok) {
+                  const reco: AiRecommendation = await res.json();
+                  setIncident(prev => prev ? { ...prev, aiRecommendation: reco } : prev);
+                }
+              } finally {
+                setAiLoading(false);
+              }
+            }}
+          />
+        </>
+      )}
     </div>
   );
 }
+
+// ── External Reports Section ──────────────────────────────────────────────────
+
+function ExternalReportsSection({
+  incidentId, externalReports, onSaved,
+}: {
+  incidentId: string;
+  externalReports: Incident['externalReports'];
+  onSaved: (updated: Incident['externalReports']) => void;
+}) {
+  const [showPolice, setShowPolice]     = useState(false);
+  const [showAmbulance, setShowAmbulance] = useState(false);
+  const [policeForm, setPoliceForm]     = useState<Omit<PoliceReport, 'submittedAt'>>({
+    officerName: '', badgeNumber: '', description: '', crimeInvolved: false,
+  });
+  const [ambulanceForm, setAmbulanceForm] = useState<Omit<AmbulanceReport, 'submittedAt'>>({
+    paramedicName: '', vehicleId: '', treatmentGiven: '', hospitalDestination: null,
+  });
+  const [saving, setSaving] = useState<'police' | 'ambulance' | null>(null);
+
+  const submitPolice = async () => {
+    setSaving('police');
+    try {
+      const payload: PoliceReport = { ...policeForm, submittedAt: new Date().toISOString() };
+      const res = await fetch(`/api/incidents/${incidentId}/police-report`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (res.ok) {
+        onSaved({
+          police: payload,
+          ambulance: externalReports?.ambulance ?? null,
+        });
+        setShowPolice(false);
+      }
+    } finally { setSaving(null); }
+  };
+
+  const submitAmbulance = async () => {
+    setSaving('ambulance');
+    try {
+      const payload: AmbulanceReport = { ...ambulanceForm, submittedAt: new Date().toISOString() };
+      const res = await fetch(`/api/incidents/${incidentId}/ambulance-report`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (res.ok) {
+        onSaved({
+          police: externalReports?.police ?? null,
+          ambulance: payload,
+        });
+        setShowAmbulance(false);
+      }
+    } finally { setSaving(null); }
+  };
+
+  const labelStyle: React.CSSProperties = { fontSize: '0.58rem', color: 'var(--db-muted)', letterSpacing: '0.08em', textTransform: 'uppercase', display: 'block', marginBottom: '3px' };
+  const inputStyle: React.CSSProperties = { width: '100%', background: 'rgba(220,232,240,0.05)', border: '1px solid var(--db-border2)', color: 'var(--db-text)', fontSize: '0.65rem', padding: '5px 8px', outline: 'none', boxSizing: 'border-box' };
+  const btnStyle = (active?: boolean): React.CSSProperties => ({
+    fontSize: '0.6rem', letterSpacing: '0.08em', padding: '4px 10px',
+    border: `1px solid ${active ? 'var(--db-blue)' : 'var(--db-border2)'}`,
+    color: active ? 'var(--db-blue)' : 'var(--db-muted)', background: 'transparent', cursor: 'pointer',
+  });
+
+  return (
+    <div className="panel-section">
+      <div className="panel-heading">
+        <span className="panel-title">Agency Reports</span>
+        <div style={{ display: 'flex', gap: '6px' }}>
+          {!externalReports?.police && (
+            <button style={btnStyle(showPolice)} onClick={() => setShowPolice(p => !p)}>
+              {showPolice ? '✕ Cancel' : '+ Police'}
+            </button>
+          )}
+          {!externalReports?.ambulance && (
+            <button style={btnStyle(showAmbulance)} onClick={() => setShowAmbulance(p => !p)}>
+              {showAmbulance ? '✕ Cancel' : '+ Ambulance'}
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Existing police report */}
+      {externalReports?.police && (
+        <div style={{ padding: '8px 20px', borderBottom: '1px solid var(--db-border2)', fontSize: '0.62rem' }}>
+          <div style={{ color: 'var(--db-blue)', marginBottom: '4px', fontSize: '0.58rem', letterSpacing: '0.08em' }}>POLICE · {externalReports.police.officerName} #{externalReports.police.badgeNumber}</div>
+          <div style={{ color: 'var(--db-text)', lineHeight: 1.5 }}>{externalReports.police.description}</div>
+          {externalReports.police.crimeInvolved && <div style={{ color: 'var(--db-amber)', marginTop: '4px', fontSize: '0.58rem' }}>⚠ Crime involvement noted</div>}
+        </div>
+      )}
+
+      {/* Existing ambulance report */}
+      {externalReports?.ambulance && (
+        <div style={{ padding: '8px 20px', borderBottom: '1px solid var(--db-border2)', fontSize: '0.62rem' }}>
+          <div style={{ color: 'var(--db-green)', marginBottom: '4px', fontSize: '0.58rem', letterSpacing: '0.08em' }}>AMBULANCE · {externalReports.ambulance.paramedicName} · {externalReports.ambulance.vehicleId}</div>
+          <div style={{ color: 'var(--db-text)', lineHeight: 1.5 }}>{externalReports.ambulance.treatmentGiven}</div>
+          {externalReports.ambulance.hospitalDestination && <div style={{ color: 'var(--db-muted)', marginTop: '3px' }}>→ {externalReports.ambulance.hospitalDestination}</div>}
+        </div>
+      )}
+
+      {/* Police report form */}
+      {showPolice && (
+        <div style={{ padding: '10px 20px', borderBottom: '1px solid var(--db-border2)', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          <div style={{ fontSize: '0.6rem', color: 'var(--db-blue)', letterSpacing: '0.08em', marginBottom: '2px' }}>POLICE REPORT</div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+            <div>
+              <label style={labelStyle}>Officer Name</label>
+              <input style={inputStyle} value={policeForm.officerName} onChange={e => setPoliceForm(f => ({ ...f, officerName: e.target.value }))} />
+            </div>
+            <div>
+              <label style={labelStyle}>Badge Number</label>
+              <input style={inputStyle} value={policeForm.badgeNumber} onChange={e => setPoliceForm(f => ({ ...f, badgeNumber: e.target.value }))} />
+            </div>
+          </div>
+          <div>
+            <label style={labelStyle}>Report Description</label>
+            <textarea style={{ ...inputStyle, height: '60px', resize: 'vertical' }} value={policeForm.description} onChange={e => setPoliceForm(f => ({ ...f, description: e.target.value }))} />
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <input type="checkbox" id="crimeInvolved" checked={policeForm.crimeInvolved} onChange={e => setPoliceForm(f => ({ ...f, crimeInvolved: e.target.checked }))} />
+            <label htmlFor="crimeInvolved" style={{ ...labelStyle, marginBottom: 0, cursor: 'pointer' }}>Crime involvement suspected</label>
+          </div>
+          <button style={{ ...btnStyle(true), alignSelf: 'flex-start' }} onClick={submitPolice} disabled={saving === 'police'}>
+            {saving === 'police' ? '↻ Saving…' : 'Submit Police Report'}
+          </button>
+        </div>
+      )}
+
+      {/* Ambulance report form */}
+      {showAmbulance && (
+        <div style={{ padding: '10px 20px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          <div style={{ fontSize: '0.6rem', color: 'var(--db-green)', letterSpacing: '0.08em', marginBottom: '2px' }}>AMBULANCE REPORT</div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+            <div>
+              <label style={labelStyle}>Paramedic Name</label>
+              <input style={inputStyle} value={ambulanceForm.paramedicName} onChange={e => setAmbulanceForm(f => ({ ...f, paramedicName: e.target.value }))} />
+            </div>
+            <div>
+              <label style={labelStyle}>Vehicle / Unit ID</label>
+              <input style={inputStyle} value={ambulanceForm.vehicleId} onChange={e => setAmbulanceForm(f => ({ ...f, vehicleId: e.target.value }))} />
+            </div>
+          </div>
+          <div>
+            <label style={labelStyle}>Treatment Given</label>
+            <textarea style={{ ...inputStyle, height: '60px', resize: 'vertical' }} value={ambulanceForm.treatmentGiven} onChange={e => setAmbulanceForm(f => ({ ...f, treatmentGiven: e.target.value }))} />
+          </div>
+          <div>
+            <label style={labelStyle}>Hospital Destination (optional)</label>
+            <input style={inputStyle} value={ambulanceForm.hospitalDestination ?? ''} onChange={e => setAmbulanceForm(f => ({ ...f, hospitalDestination: e.target.value || null }))} />
+          </div>
+          <button style={{ ...btnStyle(true), alignSelf: 'flex-start' }} onClick={submitAmbulance} disabled={saving === 'ambulance'}>
+            {saving === 'ambulance' ? '↻ Saving…' : 'Submit Ambulance Report'}
+          </button>
+        </div>
+      )}
+
+      {!externalReports?.police && !externalReports?.ambulance && !showPolice && !showAmbulance && (
+        <div style={{ padding: '10px 20px', fontSize: '0.62rem', color: 'var(--db-muted)' }}>
+          No agency reports submitted yet.
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── AI Recommendation Section ─────────────────────────────────────────────────
+
+function AiRecommendationSection({
+  incidentId: _incidentId, recommendation, loading, onGenerate,
+}: {
+  incidentId: string;
+  recommendation: AiRecommendation | null;
+  loading: boolean;
+  onGenerate: () => void;
+}) {
+  return (
+    <div className="panel-section">
+      <div className="panel-heading">
+        <span className="panel-title">AI Recommendation</span>
+        {!recommendation && (
+          <button
+            onClick={onGenerate}
+            disabled={loading}
+            style={{
+              fontSize: '0.6rem', letterSpacing: '0.08em', padding: '4px 10px',
+              border: '1px solid var(--db-blue)', color: 'var(--db-blue)',
+              background: 'transparent', cursor: loading ? 'wait' : 'pointer',
+            }}
+          >
+            {loading ? '↻ Generating…' : '⚡ Generate'}
+          </button>
+        )}
+        {recommendation && (
+          <span style={{ fontSize: '0.55rem', color: 'var(--db-muted)', letterSpacing: '0.06em' }}>
+            {recommendation.modelUsed}
+          </span>
+        )}
+      </div>
+
+      {!recommendation && !loading && (
+        <div style={{ padding: '10px 20px', fontSize: '0.62rem', color: 'var(--db-muted)' }}>
+          Generate an AI-powered recommendation using all incident data, reports, and findings.
+        </div>
+      )}
+
+      {loading && (
+        <div style={{ padding: '10px 20px', fontSize: '0.62rem', color: 'var(--db-blue)', animation: 'dotPulse 1s ease-in-out infinite' }}>
+          ↻ Analysing incident data with gpt-4o-mini…
+        </div>
+      )}
+
+      {recommendation && (
+        <>
+          <p style={{ padding: '10px 20px 4px', fontSize: '0.65rem', color: 'var(--db-text)', lineHeight: 1.6, margin: 0 }}>
+            {recommendation.summary}
+          </p>
+          <div style={{ padding: '8px 20px', borderTop: '1px solid var(--db-border2)' }}>
+            <div style={{ fontSize: '0.58rem', color: 'var(--db-amber)', letterSpacing: '0.08em', marginBottom: '6px' }}>IMMEDIATE ACTIONS</div>
+            {recommendation.immediateActions.map((a, i) => (
+              <div key={i} style={{ fontSize: '0.63rem', color: 'var(--db-text)', marginBottom: '4px', paddingLeft: '10px', borderLeft: '2px solid var(--db-amber)' }}>
+                {a}
+              </div>
+            ))}
+          </div>
+          <div style={{ padding: '8px 20px', borderTop: '1px solid var(--db-border2)' }}>
+            <div style={{ fontSize: '0.58rem', color: 'var(--db-green)', letterSpacing: '0.08em', marginBottom: '6px' }}>PREVENTION MEASURES</div>
+            {recommendation.preventionMeasures.map((m, i) => (
+              <div key={i} style={{ fontSize: '0.63rem', color: 'var(--db-text)', marginBottom: '4px', paddingLeft: '10px', borderLeft: '2px solid var(--db-green)' }}>
+                {m}
+              </div>
+            ))}
+          </div>
+          <div style={{ padding: '8px 20px 12px', borderTop: '1px solid var(--db-border2)' }}>
+            <div style={{ fontSize: '0.58rem', color: 'var(--db-muted)', letterSpacing: '0.08em', marginBottom: '6px' }}>RESOURCE NOTES</div>
+            <p style={{ fontSize: '0.63rem', color: 'var(--db-text)', lineHeight: 1.6, margin: 0 }}>
+              {recommendation.resourceNotes}
+            </p>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ── Post-Mortem Section ───────────────────────────────────────────────────────
 
 function PostMortemSection({ report }: { report: IncidentReport }) {
   const { timeline, responseMetrics: m, recommendations } = report;

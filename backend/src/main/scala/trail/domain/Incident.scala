@@ -30,7 +30,9 @@ final case class Incident(
   route: Option[ResponderRoute],
   createdAt: String,
   updatedAt: String,
-  report: Option[IncidentReport] = None
+  report:           Option[IncidentReport]    = None,
+  externalReports:  Option[ExternalReports]   = None,
+  aiRecommendation: Option[AiRecommendation]  = None
 )
 
 object Incident:

@@ -25,7 +25,8 @@ object Main extends IOApp:
         triageService  = new TriageService
         routingService = new ResponderRoutingService
         postMortemSvc  = new PostMortemService
-        incidentSvc    = new IncidentService(repo, zonePredictor, droneDispatch, triageService, routingService, postMortemSvc)
+        aiRecoSvc      = new AiRecommendationService
+        incidentSvc    = new IncidentService(repo, zonePredictor, droneDispatch, triageService, routingService, postMortemSvc, aiRecoSvc)
 
         allRoutes    = TriggerRoutes.routes(incidentSvc) <+> IncidentRoutes.routes(incidentSvc)
         loggedRoutes = HttpLogger.httpRoutes(logHeaders = false, logBody = false)(allRoutes)

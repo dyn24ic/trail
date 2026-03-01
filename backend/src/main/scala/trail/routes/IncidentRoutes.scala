@@ -5,10 +5,13 @@ import io.circe.syntax.*
 import org.http4s.*
 import org.http4s.circe.*
 import org.http4s.dsl.io.*
-import trail.domain.{Incident, IncidentReport, IncidentSummary}
+import trail.domain.{AmbulanceReport, Incident, IncidentReport, IncidentSummary, PoliceReport}
 import trail.services.IncidentService
 
 object IncidentRoutes:
+
+  given EntityDecoder[IO, PoliceReport]    = jsonOf[IO, PoliceReport]
+  given EntityDecoder[IO, AmbulanceReport] = jsonOf[IO, AmbulanceReport]
 
   def routes(service: IncidentService): HttpRoutes[IO] = HttpRoutes.of[IO]:
 
@@ -37,6 +40,35 @@ object IncidentRoutes:
           ))
         case None =>
           NotFound(io.circe.Json.obj("error" -> s"Incident $id not found".asJson))
+
+    case req @ POST -> Root / "api" / "v1" / "incidents" / id / "police-report" =>
+      req.decode[PoliceReport] { report =>
+        service.submitPoliceReport(id, report).flatMap:
+          case Some(_) => Ok(io.circe.Json.obj("message" -> "Police report saved".asJson))
+          case None    => NotFound(io.circe.Json.obj("error" -> s"Incident $id not found".asJson))
+      }.handleErrorWith { err =>
+        BadRequest(io.circe.Json.obj("error" -> err.getMessage.asJson))
+      }
+
+    case req @ POST -> Root / "api" / "v1" / "incidents" / id / "ambulance-report" =>
+      req.decode[AmbulanceReport] { report =>
+        service.submitAmbulanceReport(id, report).flatMap:
+          case Some(_) => Ok(io.circe.Json.obj("message" -> "Ambulance report saved".asJson))
+          case None    => NotFound(io.circe.Json.obj("error" -> s"Incident $id not found".asJson))
+      }.handleErrorWith { err =>
+        BadRequest(io.circe.Json.obj("error" -> err.getMessage.asJson))
+      }
+
+    case POST -> Root / "api" / "v1" / "incidents" / id / "ai-recommendation" =>
+      service.generateAiRecommendation(id).flatMap:
+        case Some(reco) => Ok(reco.asJson)
+        case None       => NotFound(io.circe.Json.obj("error" -> s"Incident $id not found".asJson))
+
+    case GET -> Root / "api" / "v1" / "incidents" / id / "ai-recommendation" =>
+      service.getIncident(id).flatMap:
+        case Some(i) if i.aiRecommendation.isDefined => Ok(i.aiRecommendation.asJson)
+        case Some(_) => NotFound(io.circe.Json.obj("error" -> "No AI recommendation generated yet".asJson))
+        case None    => NotFound(io.circe.Json.obj("error" -> s"Incident $id not found".asJson))
 
   private def toSummary(i: Incident): IncidentSummary =
     IncidentSummary(

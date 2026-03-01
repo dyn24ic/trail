@@ -187,6 +187,36 @@ export interface HybridRoute {
 
 // ── Scala incident types ──────────────────────────────────────────────────────
 
+export interface PoliceReport {
+  officerName:   string;
+  badgeNumber:   string;
+  description:   string;
+  crimeInvolved: boolean;
+  submittedAt:   string;
+}
+
+export interface AmbulanceReport {
+  paramedicName:       string;
+  vehicleId:           string;
+  treatmentGiven:      string;
+  hospitalDestination: string | null;
+  submittedAt:         string;
+}
+
+export interface ExternalReports {
+  police:    PoliceReport | null;
+  ambulance: AmbulanceReport | null;
+}
+
+export interface AiRecommendation {
+  generatedAt:        string;
+  summary:            string;
+  immediateActions:   string[];
+  preventionMeasures: string[];
+  resourceNotes:      string;
+  modelUsed:          string;
+}
+
 export type IncidentStatus =
   | 'Triggered'
   | 'Searching'
@@ -281,10 +311,12 @@ export interface IncidentReport {
 }
 
 export interface Incident extends IncidentSummary {
-  triggerPayload: string;
-  searchZones: ScalaSearchZone[] | null;
-  droneResult: ScalaDroneResult | null;
-  triage: ScalaInjuryTriage | null;
-  route: ScalaResponderRoute | null;
-  report: IncidentReport | null;
+  triggerPayload:   string;
+  searchZones:      ScalaSearchZone[] | null;
+  droneResult:      ScalaDroneResult | null;
+  triage:           ScalaInjuryTriage | null;
+  route:            ScalaResponderRoute | null;
+  report:           IncidentReport | null;
+  externalReports:  ExternalReports | null;
+  aiRecommendation: AiRecommendation | null;
 }

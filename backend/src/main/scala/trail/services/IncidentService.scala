@@ -12,7 +12,8 @@ class IncidentService(
   droneDispatch:   DroneDispatchService,
   triageService:   TriageService,
   routingService:  ResponderRoutingService,
-  postMortemSvc:   PostMortemService
+  postMortemSvc:   PostMortemService,
+  aiRecoSvc:       AiRecommendationService
 ):
   // Mock fixed trailhead for responder routing
   private val TrailheadLat = -33.8688
@@ -117,3 +118,37 @@ class IncidentService(
 
   def getReport(id: String): IO[Option[IncidentReport]] =
     repo.findById(id).map(_.flatMap(_.report))
+
+  def submitPoliceReport(id: String, report: PoliceReport): IO[Option[Incident]] =
+    repo.findById(id).flatMap:
+      case None => IO.pure(None)
+      case Some(inc) =>
+        val existing = inc.externalReports.getOrElse(ExternalReports(None, None))
+        val updated  = inc.copy(
+          externalReports = Some(existing.copy(police = Some(report))),
+          updatedAt       = java.time.Instant.now().toString
+        )
+        repo.updateFull(updated).as(Some(updated))
+
+  def submitAmbulanceReport(id: String, report: AmbulanceReport): IO[Option[Incident]] =
+    repo.findById(id).flatMap:
+      case None => IO.pure(None)
+      case Some(inc) =>
+        val existing = inc.externalReports.getOrElse(ExternalReports(None, None))
+        val updated  = inc.copy(
+          externalReports = Some(existing.copy(ambulance = Some(report))),
+          updatedAt       = java.time.Instant.now().toString
+        )
+        repo.updateFull(updated).as(Some(updated))
+
+  def generateAiRecommendation(id: String): IO[Option[AiRecommendation]] =
+    repo.findById(id).flatMap:
+      case None => IO.pure(None)
+      case Some(inc) =>
+        aiRecoSvc.generate(inc).flatMap { reco =>
+          val updated = inc.copy(
+            aiRecommendation = Some(reco),
+            updatedAt        = java.time.Instant.now().toString
+          )
+          repo.updateFull(updated).as(Some(reco))
+        }
