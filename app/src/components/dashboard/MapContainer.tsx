@@ -16,6 +16,8 @@ import type { RoutingMode } from './LeafletMapView';
 import { HikeNode, HikeStats, HikeRoute, YOSEMITE_EXAMPLE_ROUTE } from '@/lib/hikeRoute';
 import HikeRoutePanel from './HikeRoutePanel';
 import { useSensorSuggestions } from '@/hooks/useSensorSuggestions';
+import DroneFlightPanel from './DroneFlightPanel';
+import type { DroneSearchUpdate } from '@/data/dronePath';
 
 // ── Coordinate utilities ───────────────────────────────────────────────────
 
@@ -156,6 +158,8 @@ export default function MapContainer({ onMapMove }: MapContainerProps) {
   const [hikeMode, setHikeMode] = useState(false);
   const [hikeWaypoints, setHikeWaypoints] = useState<HikeNode[]>([]);
   const [hikeStats, setHikeStats] = useState<HikeStats | null>(null);
+  const [droneSearchActive, setDroneSearchActive] = useState(false);
+  const [droneUpdate, setDroneUpdate] = useState<DroneSearchUpdate | null>(null);
   const mapboxMapRef = useRef<mapboxgl.Map | null>(null);
   const hikeNodeIdxRef = useRef(0);
 
@@ -471,6 +475,32 @@ export default function MapContainer({ onMapMove }: MapContainerProps) {
             {hikeWaypoints.length} node{hikeWaypoints.length !== 1 ? 's' : ''}
           </div>
         )}
+
+        {/* Drone SAR */}
+        <div className="tb-sep" />
+        <span className="tb-section-lbl">DRONE SAR</span>
+
+        <button
+          style={droneSearchActive ? tbBtnOn : tbBtnBase}
+          onClick={() => {
+            const next = !droneSearchActive;
+            setDroneSearchActive(next);
+            if (!next) {
+              setDroneUpdate(null);
+            } else {
+              setViewMode('3d');
+              setLayers(prev => ({ ...prev, osm: false }));
+            }
+          }}
+        >
+          {droneSearchActive ? '⬡ Abort Search' : '⬡ Launch SAR'}
+        </button>
+
+        {droneUpdate?.victimFound && (
+          <div style={{ fontSize: '10px', color: '#ff6020', padding: '2px 0', letterSpacing: '0.04em' }}>
+            ◉ VICTIM LOCATED
+          </div>
+        )}
       </div>
 
       {/* ── Mapbox Scene (3D terrain only) ────────────────────────────── */}
@@ -491,6 +521,8 @@ export default function MapContainer({ onMapMove }: MapContainerProps) {
           bleScanners={scanners}
           droneData={droneData}
           incidentData={allIncidentMarkers}
+          droneSearchActive={droneSearchActive}
+          onDroneUpdate={setDroneUpdate}
         />
       </div>
 
@@ -526,6 +558,16 @@ export default function MapContainer({ onMapMove }: MapContainerProps) {
           pointerEvents: 'none',
         }}>
           <HikeRoutePanel waypoints={hikeWaypoints} stats={hikeStats} />
+        </div>
+      )}
+
+      {/* ── Drone SAR flight panel ────────────────────────────────────── */}
+      {droneSearchActive && (
+        <div style={{
+          position: 'absolute', bottom: 16, right: 16,
+          width: 420, zIndex: 821, pointerEvents: 'none',
+        }}>
+          <DroneFlightPanel update={droneUpdate} />
         </div>
       )}
 
@@ -607,6 +649,9 @@ export default function MapContainer({ onMapMove }: MapContainerProps) {
               <span className="legend-dot" style={{ background: 'rgba(255,193,7,0.4)', border: '1.5px solid #FFC107', borderRadius: '2px', transform: 'rotate(45deg)' }} />
               Drone Hub
             </div>
+            <div className="legend-item"><span className="legend-line" style={{ background: '#ef4444' }} />Trail · High Traffic</div>
+            <div className="legend-item"><span className="legend-line" style={{ background: '#f59e0b' }} />Trail · Medium Traffic</div>
+            <div className="legend-item"><span className="legend-line" style={{ background: '#22c55e' }} />Trail · Low Traffic</div>
             <div className="legend-item"><span className="legend-line" style={{ background: '#22d3ee' }} />Road Route</div>
             <div className="legend-item"><span className="legend-line" style={{ background: '#22c55e' }} />Mountain (Low)</div>
             <div className="legend-item"><span className="legend-line" style={{ background: '#ef4444' }} />Mountain (High Risk)</div>

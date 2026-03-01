@@ -7,9 +7,56 @@ import type { HikeNode } from '@/lib/hikeRoute';
 import type { LatLon, HybridRoute } from '@/types/backend';
 import { YOSEMITE_BBOX } from '@/data/trailBbox';
 import { YOSEMITE_BOUNDARY, WORLD_RING } from '@/data/yosemiteBoundary';
+import { TRAIL_SEGMENTS } from '@/data/trailSegments';
 import type { DangerZone } from '@/types/backend';
 import type { HotspotPredictionResponse } from '@/types/hotspots';
 import type { BleScannerSuggestion, DroneMarker, IncidentMarker } from '@/types/markers';
+import { DRONE_CONFIGS, DRONE_SEARCH_DURATION_MS } from '@/data/dronePath';
+import type { DroneState, DroneSearchUpdate } from '@/data/dronePath';
+
+// ── Path interpolation helper ─────────────────────────────────────────────
+
+function interpolatePath(
+  path: [number, number][],
+  t: number,
+): { lon: number; lat: number; bearing: number } {
+  if (path.length === 0) return { lon: 0, lat: 0, bearing: 0 };
+  if (path.length === 1) return { lon: path[0][0], lat: path[0][1], bearing: 0 };
+
+  const clamped = Math.max(0, Math.min(1, t));
+
+  // Cumulative lengths in degree-space (lat-corrected for lon)
+  const lengths: number[] = [0];
+  for (let i = 1; i < path.length; i++) {
+    const [lon0, lat0] = path[i - 1];
+    const [lon1, lat1] = path[i];
+    const dlat = lat1 - lat0;
+    const dlon = (lon1 - lon0) * Math.cos((lat0 * Math.PI) / 180);
+    lengths.push(lengths[i - 1] + Math.sqrt(dlat * dlat + dlon * dlon));
+  }
+
+  const total = lengths[lengths.length - 1];
+  const target = clamped * total;
+
+  let segIdx = lengths.length - 2;
+  for (let i = 0; i < lengths.length - 1; i++) {
+    if (target <= lengths[i + 1]) { segIdx = i; break; }
+  }
+
+  const segLen = lengths[segIdx + 1] - lengths[segIdx];
+  const segT = segLen > 0 ? (target - lengths[segIdx]) / segLen : 0;
+
+  const [lon0, lat0] = path[segIdx];
+  const [lon1, lat1] = path[segIdx + 1];
+  const lon = lon0 + (lon1 - lon0) * segT;
+  const lat = lat0 + (lat1 - lat0) * segT;
+
+  const dlat = lat1 - lat0;
+  const dlon = (lon1 - lon0) * Math.cos((lat0 * Math.PI) / 180);
+  const bearing = (Math.atan2(dlon, dlat) * 180) / Math.PI;
+
+  return { lon, lat, bearing };
+}
 
 interface MapboxSceneProps {
   viewMode: '3d' | '2d';
@@ -34,6 +81,8 @@ interface MapboxSceneProps {
   bleScanners?: BleScannerSuggestion[];
   droneData?: DroneMarker[];
   incidentData?: IncidentMarker[];
+  droneSearchActive?: boolean;
+  onDroneUpdate?: (update: DroneSearchUpdate) => void;
 }
 
 const CENTER_LAT = (YOSEMITE_BBOX.north + YOSEMITE_BBOX.south) / 2;
@@ -55,6 +104,8 @@ export default function MapboxScene({
   bleScanners = [],
   droneData = [],
   incidentData = [],
+  droneSearchActive = false,
+  onDroneUpdate,
 }: MapboxSceneProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
@@ -76,6 +127,10 @@ export default function MapboxScene({
   const onHikeNodeClickRef = useRef(onHikeNodeClick);
   useEffect(() => { hikeModeRef.current = hikeMode ?? false; }, [hikeMode]);
   useEffect(() => { onHikeNodeClickRef.current = onHikeNodeClick; }, [onHikeNodeClick]);
+
+  // Drone update callback ref (keeps RAF loop stable)
+  const onDroneUpdateRef = useRef(onDroneUpdate);
+  useEffect(() => { onDroneUpdateRef.current = onDroneUpdate; }, [onDroneUpdate]);
 
   // ── Initialize map once ───────────────────────────────────────────────────
   useEffect(() => {
@@ -157,6 +212,43 @@ export default function MapboxScene({
         type: 'line',
         source: 'yosemite-boundary-src',
         paint: { 'line-color': '#00FF88', 'line-width': 1.5, 'line-dasharray': [6, 3], 'line-opacity': 0.9 },
+      });
+
+      // ── Trail traffic overlay ────────────────────────────────────────────
+      const trailFeatures = TRAIL_SEGMENTS.map(seg => ({
+        type: 'Feature' as const,
+        properties: { traffic: seg.traffic, name: seg.name },
+        geometry: { type: 'LineString' as const, coordinates: seg.coords },
+      }));
+
+      map.addSource('trail-traffic-src', {
+        type: 'geojson',
+        data: { type: 'FeatureCollection', features: trailFeatures },
+      });
+
+      // Casing (dark background for legibility against terrain)
+      map.addLayer({
+        id: 'trail-traffic-casing',
+        type: 'line',
+        source: 'trail-traffic-src',
+        paint: { 'line-color': '#0a0a0a', 'line-width': 5, 'line-opacity': 0.55 },
+      });
+
+      // Traffic-colored line
+      map.addLayer({
+        id: 'trail-traffic-line',
+        type: 'line',
+        source: 'trail-traffic-src',
+        paint: {
+          'line-width': 3,
+          'line-opacity': 0.92,
+          'line-color': [
+            'match', ['get', 'traffic'],
+            'high',   '#ef4444',
+            'medium', '#f59e0b',
+                      '#22c55e', // low / default
+          ],
+        },
       });
 
       // ── Hide labels outside Yosemite boundary ─────────────────────────
@@ -732,6 +824,112 @@ export default function MapboxScene({
     if (map.isStyleLoaded()) apply();
     else map.once('load', apply);
   }, [hikeWaypoints]);
+
+  // ── Drone SAR animation (RAF loop) ───────────────────────────────────────
+  useEffect(() => {
+    if (!droneSearchActive || !mapStyleLoaded) return;
+    const map = mapRef.current;
+    if (!map || !map.isStyleLoaded()) return;
+
+    // Add per-drone sources + layers
+    DRONE_CONFIGS.forEach(cfg => {
+      if (map.getSource(`drone-pos-${cfg.id}`)) return;
+      const startCoord = cfg.path[0];
+      map.addSource(`drone-pos-${cfg.id}`, {
+        type: 'geojson',
+        data: { type: 'Feature', geometry: { type: 'Point', coordinates: startCoord }, properties: {} },
+      });
+      // Pulse ring
+      map.addLayer({
+        id: `drone-pulse-${cfg.id}`, type: 'circle', source: `drone-pos-${cfg.id}`,
+        paint: { 'circle-radius': 60, 'circle-color': cfg.color, 'circle-opacity': 0.15, 'circle-stroke-width': 0 },
+      });
+      // Dot
+      map.addLayer({
+        id: `drone-dot-${cfg.id}`, type: 'circle', source: `drone-pos-${cfg.id}`,
+        paint: { 'circle-radius': 7, 'circle-color': cfg.color, 'circle-opacity': 1, 'circle-stroke-width': 2, 'circle-stroke-color': '#ffffff' },
+      });
+    });
+
+    let rafId: number;
+    let startTime: number | null = null;
+    let victimFoundFired = false;
+    let victimFoundData: { droneId: string; lat: number; lon: number } | null = null;
+    const dur = DRONE_SEARCH_DURATION_MS;
+
+    const tick = (now: number) => {
+      if (!startTime) startTime = now;
+      const globalT = Math.min((now - startTime) / dur, 1);
+
+      const droneStates: DroneState[] = DRONE_CONFIGS.map(cfg => {
+        const loopT = cfg.victimAtProgress != null
+          ? Math.min(globalT / cfg.victimAtProgress, 1)
+          : globalT % 1;
+
+        const pos = interpolatePath(cfg.path, loopT);
+        const isFound = cfg.victimAtProgress != null && globalT >= cfg.victimAtProgress;
+
+        (map.getSource(`drone-pos-${cfg.id}`) as mapboxgl.GeoJSONSource)
+          ?.setData({ type: 'Feature', geometry: { type: 'Point', coordinates: [pos.lon, pos.lat] }, properties: {} });
+
+        const pulse = 55 + Math.sin(now * 0.004 + cfg.id.charCodeAt(0)) * 22;
+        try { map.setPaintProperty(`drone-pulse-${cfg.id}`, 'circle-radius', pulse); } catch {}
+
+        return {
+          id: cfg.id, label: cfg.label, color: cfg.color,
+          lat: pos.lat, lon: pos.lon, bearing: pos.bearing,
+          progress: loopT,
+          status: isFound ? 'found' as const : 'searching' as const,
+        };
+      });
+
+      // Victim found event (fire once)
+      const victimCfg = DRONE_CONFIGS.find(c => c.victimAtProgress != null && globalT >= c.victimAtProgress);
+      if (victimCfg && !victimFoundFired) {
+        victimFoundFired = true;
+        const vPos = interpolatePath(victimCfg.path, 1); // drone is at end of its path
+        victimFoundData = { droneId: victimCfg.id, lat: vPos.lat, lon: vPos.lon };
+
+        if (!map.getSource('victim-marker')) {
+          map.addSource('victim-marker', {
+            type: 'geojson',
+            data: { type: 'Feature', geometry: { type: 'Point', coordinates: [vPos.lon, vPos.lat] }, properties: {} },
+          });
+          map.addLayer({
+            id: 'victim-dot', type: 'circle', source: 'victim-marker',
+            paint: { 'circle-radius': 10, 'circle-color': '#FF3B3B', 'circle-opacity': 1, 'circle-stroke-width': 3, 'circle-stroke-color': '#ffffff' },
+          });
+        }
+
+        map.flyTo({ center: [vPos.lon, vPos.lat], zoom: 14, pitch: 60, duration: 2500 });
+      }
+
+      onDroneUpdateRef.current?.({
+        drones: droneStates,
+        victimFound: victimFoundFired,
+        victimDroneId: victimFoundData?.droneId ?? null,
+        victimLat: victimFoundData?.lat ?? null,
+        victimLon: victimFoundData?.lon ?? null,
+      });
+
+      if (globalT < 1) rafId = requestAnimationFrame(tick);
+    };
+
+    rafId = requestAnimationFrame(tick);
+
+    return () => {
+      cancelAnimationFrame(rafId);
+      // Remove all SAR drone layers + sources
+      DRONE_CONFIGS.forEach(cfg => {
+        try { map.removeLayer(`drone-dot-${cfg.id}`); } catch {}
+        try { map.removeLayer(`drone-pulse-${cfg.id}`); } catch {}
+        try { map.removeSource(`drone-pos-${cfg.id}`); } catch {}
+      });
+      try { map.removeLayer('victim-dot'); } catch {}
+      try { map.removeSource('victim-marker'); } catch {}
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [droneSearchActive, mapStyleLoaded]);
 
   if (!token) {
     return (

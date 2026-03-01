@@ -5,6 +5,7 @@ import type { Map as LeafletMap, Marker, Polyline, CircleMarker, Polygon, TileLa
 import type { HybridRoute, LatLon, DangerZone } from '@/types/backend';
 import type { HikeNode } from '@/lib/hikeRoute';
 import { YOSEMITE_BOUNDARY, WORLD_RING } from '@/data/yosemiteBoundary';
+import { TRAIL_SEGMENTS } from '@/data/trailSegments';
 import type { BleScannerSuggestion, DroneMarker, IncidentMarker } from '@/types/markers';
 
 export type RoutingMode = 'set-ambulance' | 'set-victim' | 'view';
@@ -236,6 +237,22 @@ export default function LeafletMapView({
           interactive: false,
         }
       ).addTo(map);
+
+      // ── Trail traffic overlay ────────────────────────────────────────────
+      const trafficColor = (t: string) =>
+        t === 'high' ? '#ef4444' : t === 'medium' ? '#f59e0b' : '#22c55e';
+
+      TRAIL_SEGMENTS.forEach(seg => {
+        const latlngs = seg.coords.map(([lon, lat]) => [lat, lon] as [number, number]);
+        L.polyline(latlngs, {
+          color: trafficColor(seg.traffic),
+          weight: 4,
+          opacity: 0.85,
+          interactive: true,
+        })
+          .bindTooltip(seg.name, { sticky: true })
+          .addTo(map);
+      });
 
       // Permanent click handler
       map.on('click', (e) => {
