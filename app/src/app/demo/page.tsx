@@ -153,12 +153,50 @@ export default function DemoPage() {
   async function advanceHiker(hikerId: string) {
     setAdvancingHiker(hikerId);
     try {
+      const hiker = TRACKED_HIKERS.find(h => h.id === hikerId);
+      if (!hiker) return;
+      const nextIdx = hikerNextIdx[hikerId] ?? 0;
+      const event = hiker.events[nextIdx];
+
       await fetch('/api/demo/hiker-advance', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ hikerId }),
       });
       setHikerNextIdx(prev => ({ ...prev, [hikerId]: (prev[hikerId] ?? 0) + 1 }));
+
+      // Auto-trigger an incident when a missed checkpoint is fired
+      if (event?.status === 'missed') {
+        const sensor = hiker.sensors.find(s => s.id === event.sensorId);
+        if (sensor) {
+          const res = await fetch('/api/incidents', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              sensorId: sensor.id,
+              anomalyType: 'missed_checkpoint',
+              lat: sensor.lat,
+              lng: sensor.lon,
+            }),
+          });
+          if (res.ok) {
+            const data = await res.json();
+            if (data.incidentId) {
+              setTracked(prev => [
+                {
+                  id: data.incidentId,
+                  kind: 'SensorAnomaly' as const,
+                  location: `${hiker.name} — ${sensor.label}`,
+                  detail: null,
+                  loading: true,
+                  expanded: true,
+                },
+                ...prev,
+              ]);
+            }
+          }
+        }
+      }
     } finally {
       setAdvancingHiker(null);
     }
@@ -371,9 +409,28 @@ export default function DemoPage() {
         {/* ── Tracked incidents ───────────────────────────────────────── */}
         {tracked.length > 0 && (
           <section style={{ marginTop: '48px' }}>
-            <p style={{ fontSize: '12px', color: 'rgba(220,232,240,0.4)', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: '16px' }}>
-              Live incidents — polling every 2 s
-            </p>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '16px' }}>
+              <p style={{ fontSize: '12px', color: 'rgba(220,232,240,0.4)', letterSpacing: '0.1em', textTransform: 'uppercase', margin: 0 }}>
+                Live incidents — polling every 2 s
+              </p>
+              <button
+                onClick={() => setTracked([])}
+                style={{
+                  marginLeft: 'auto',
+                  padding: '6px 16px',
+                  background: 'rgba(255,80,80,0.08)',
+                  border: '1px solid rgba(255,80,80,0.3)',
+                  color: '#FF5050',
+                  borderRadius: '3px',
+                  fontSize: '11px',
+                  letterSpacing: '0.1em',
+                  textTransform: 'uppercase',
+                  cursor: 'pointer',
+                }}
+              >
+                Archive All
+              </button>
+            </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
               {tracked.map(t => (

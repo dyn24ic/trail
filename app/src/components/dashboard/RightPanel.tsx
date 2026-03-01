@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import { useIncidents } from '@/lib/incidents/useIncidents';
 import type { IncidentSummary, IncidentStatus } from '@/types/backend';
 import type { DashboardLayout } from '@/hooks/useDashboardLayout';
@@ -46,11 +47,13 @@ const TABS: { id: DashboardLayout['rightTab']; label: string }[] = [
 
 export default function RightPanel({ rightTab, setRightTab, openTab, hikerStates }: RightPanelProps) {
   const { incidents } = useIncidents();
+  const [archivedIds, setArchivedIds] = useState<Set<string>>(new Set());
   const deviantCount = hikerStates.filter(s => s.deviated).length;
-  const sorted = [...incidents].sort(
+  const visible = incidents.filter(i => !archivedIds.has(i.id));
+  const sorted = [...visible].sort(
     (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
   );
-  const openCount = incidents.filter(i => i.status !== 'Closed').length;
+  const openCount = visible.filter(i => i.status !== 'Closed').length;
 
   return (
     <aside className="sidebar sidebar--right">
@@ -85,6 +88,7 @@ export default function RightPanel({ rightTab, setRightTab, openTab, hikerStates
             openCount={openCount}
             openTab={openTab}
             onOpenAnalytics={() => openTab({ id: 'analytics', title: '◈ Analytics', type: 'analytics', closeable: true })}
+            onArchiveAll={() => setArchivedIds(prev => new Set([...prev, ...incidents.map(i => i.id)]))}
           />
         )}
         {rightTab === 'ai' && <AITab />}
@@ -101,11 +105,13 @@ function ActiveTab({
   openCount,
   openTab,
   onOpenAnalytics,
+  onArchiveAll,
 }: {
   incidents: IncidentSummary[];
   openCount: number;
   openTab: (tab: Tab) => void;
   onOpenAnalytics: () => void;
+  onArchiveAll: () => void;
 }) {
   function handleOpenDetail(inc: IncidentSummary) {
     openTab({
@@ -124,6 +130,25 @@ function ActiveTab({
         <span className="panel-badge" style={openCount > 0 ? { color: 'var(--db-red)' } : {}}>
           {openCount} Open
         </span>
+        {incidents.length > 0 && (
+          <button
+            onClick={onArchiveAll}
+            style={{
+              marginLeft: 'auto',
+              padding: '2px 8px',
+              background: 'rgba(255,80,80,0.08)',
+              border: '1px solid rgba(255,80,80,0.3)',
+              color: '#FF5050',
+              borderRadius: '2px',
+              fontSize: '0.55rem',
+              letterSpacing: '0.1em',
+              textTransform: 'uppercase',
+              cursor: 'pointer',
+            }}
+          >
+            Archive All
+          </button>
+        )}
       </div>
 
       {incidents.length === 0 ? (
