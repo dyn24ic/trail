@@ -7,6 +7,7 @@ import type { HikeNode } from "@/lib/hikeRoute";
 import type { LatLon, HybridRoute } from "@/types/backend";
 import { YOSEMITE_BBOX } from "@/data/trailBbox";
 import { YOSEMITE_BOUNDARY, WORLD_RING } from "@/data/yosemiteBoundary";
+import { TRAIL_SEGMENTS } from "@/data/trailSegments";
 import type { DangerZone } from "@/types/backend";
 import type { HotspotPredictionResponse } from "@/types/hotspots";
 import type {
@@ -65,6 +66,13 @@ function interpolatePath(
   return { lon, lat, bearing };
 }
 
+interface DeviantHikerMarker {
+  id: string;
+  name: string;
+  lat: number;
+  lon: number;
+}
+
 interface MapboxSceneProps {
   viewMode: "3d" | "2d";
   layers: {
@@ -90,6 +98,7 @@ interface MapboxSceneProps {
   incidentData?: IncidentMarker[];
   droneSearchActive?: boolean;
   onDroneUpdate?: (update: DroneSearchUpdate) => void;
+  deviantHikers?: DeviantHikerMarker[];
 }
 
 const CENTER_LAT = (YOSEMITE_BBOX.north + YOSEMITE_BBOX.south) / 2;
@@ -113,6 +122,7 @@ export default function MapboxScene({
   incidentData = [],
   droneSearchActive = false,
   onDroneUpdate,
+  deviantHikers = [],
 }: MapboxSceneProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
@@ -1274,6 +1284,101 @@ export default function MapboxScene({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [droneSearchActive, mapStyleLoaded]);
+
+  // ── Deviant hiker alert dot ───────────────────────────────────────────────
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapStyleLoaded) return;
+
+    const SRC = "hiker-alert-src";
+    const LAYER_GLOW = "hiker-alert-glow";
+    const LAYER_DOT  = "hiker-alert-dot";
+
+    const fc: GeoJSON.FeatureCollection = {
+      type: "FeatureCollection",
+      features: deviantHikers.map(d => ({
+        type: "Feature" as const,
+        properties: { name: d.name },
+        geometry: { type: "Point" as const, coordinates: [d.lon, d.lat] },
+      })),
+    };
+
+    const apply = () => {
+      if (map.getSource(SRC)) {
+        (map.getSource(SRC) as mapboxgl.GeoJSONSource).setData(fc);
+        return;
+      }
+      if (fc.features.length === 0) return;
+
+      map.addSource(SRC, { type: "geojson", data: fc });
+      map.addLayer({
+        id: LAYER_GLOW,
+        type: "circle",
+        source: SRC,
+        paint: {
+          "circle-radius": 28,
+          "circle-color": "#FF3B3B",
+          "circle-opacity": 0.18,
+          "circle-stroke-width": 0,
+        },
+      });
+      map.addLayer({
+        id: LAYER_DOT,
+        type: "circle",
+        source: SRC,
+        paint: {
+          "circle-radius": 12,
+          "circle-color": "#FF3B3B",
+          "circle-opacity": 1,
+          "circle-stroke-width": 3,
+          "circle-stroke-color": "#ffffff",
+        },
+      });
+    };
+
+    if (map.isStyleLoaded()) apply();
+    else map.once("load", apply);
+
+    // Pulse the glow ring via setInterval
+    let opacity = 0.18;
+    let dir = -1;
+    const pulseId = setInterval(() => {
+      const m = mapRef.current;
+      if (!m?.getLayer(LAYER_GLOW)) return;
+      opacity += dir * 0.06;
+      if (opacity <= 0.04) { opacity = 0.04; dir = 1; }
+      if (opacity >= 0.30) { opacity = 0.30; dir = -1; }
+      try { m.setPaintProperty(LAYER_GLOW, "circle-opacity", opacity); } catch {}
+    }, 80);
+
+    return () => {
+      clearInterval(pulseId);
+      const m = mapRef.current;
+      if (!m) return;
+      try { m.removeLayer(LAYER_DOT); } catch {}
+      try { m.removeLayer(LAYER_GLOW); } catch {}
+      try { m.removeSource(SRC); } catch {}
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deviantHikers.length, mapStyleLoaded]);
+
+  // Update deviant hiker positions when they change
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapStyleLoaded) return;
+    const SRC = "hiker-alert-src";
+    if (!map.getSource(SRC)) return;
+
+    const fc: GeoJSON.FeatureCollection = {
+      type: "FeatureCollection",
+      features: deviantHikers.map(d => ({
+        type: "Feature" as const,
+        properties: { name: d.name },
+        geometry: { type: "Point" as const, coordinates: [d.lon, d.lat] },
+      })),
+    };
+    (map.getSource(SRC) as mapboxgl.GeoJSONSource).setData(fc);
+  }, [deviantHikers, mapStyleLoaded]);
 
   if (!token) {
     return (

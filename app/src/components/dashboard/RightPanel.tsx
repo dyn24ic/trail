@@ -4,6 +4,8 @@ import { useIncidents } from '@/lib/incidents/useIncidents';
 import type { IncidentSummary, IncidentStatus } from '@/types/backend';
 import type { DashboardLayout } from '@/hooks/useDashboardLayout';
 import type { Tab } from '@/hooks/useTabs';
+import type { HikerState } from '@/hooks/useHikerTracking';
+import HikerTrackingPanel from './HikerTrackingPanel';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -33,15 +35,18 @@ interface RightPanelProps {
   rightTab: DashboardLayout['rightTab'];
   setRightTab: (tab: DashboardLayout['rightTab']) => void;
   openTab: (tab: Tab) => void;
+  hikerStates: HikerState[];
 }
 
 const TABS: { id: DashboardLayout['rightTab']; label: string }[] = [
   { id: 'active', label: 'ACTIVE' },
   { id: 'ai',     label: 'AI'     },
+  { id: 'hikers', label: 'HIKERS' },
 ];
 
-export default function RightPanel({ rightTab, setRightTab, openTab }: RightPanelProps) {
+export default function RightPanel({ rightTab, setRightTab, openTab, hikerStates }: RightPanelProps) {
   const { incidents } = useIncidents();
+  const deviantCount = hikerStates.filter(s => s.deviated).length;
   const sorted = [...incidents].sort(
     (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
   );
@@ -58,6 +63,16 @@ export default function RightPanel({ rightTab, setRightTab, openTab }: RightPane
             onClick={() => setRightTab(t.id)}
           >
             {t.label}
+            {t.id === 'hikers' && deviantCount > 0 && (
+              <span style={{
+                marginLeft: '4px',
+                color: '#FF3B3B',
+                fontSize: '0.6rem',
+                fontWeight: 'bold',
+              }}>
+                {deviantCount}
+              </span>
+            )}
           </button>
         ))}
       </div>
@@ -73,6 +88,7 @@ export default function RightPanel({ rightTab, setRightTab, openTab }: RightPane
           />
         )}
         {rightTab === 'ai' && <AITab />}
+        {rightTab === 'hikers' && <HikerTrackingPanel hikerStates={hikerStates} />}
       </div>
     </aside>
   );

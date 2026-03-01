@@ -18,6 +18,8 @@ import HikeRoutePanel from './HikeRoutePanel';
 import { useSensorSuggestions } from '@/hooks/useSensorSuggestions';
 import DroneFlightPanel from './DroneFlightPanel';
 import type { DroneSearchUpdate } from '@/data/dronePath';
+import HikerAlertPanel from './HikerAlertPanel';
+import type { DeviantHiker } from '@/hooks/useHikerTracking';
 
 // ── Coordinate utilities ───────────────────────────────────────────────────
 
@@ -135,9 +137,10 @@ const tbBtnOn: React.CSSProperties = {
 
 interface MapContainerProps {
   onMapMove?: (lat: number, lon: number) => void;
+  deviantHikers?: DeviantHiker[];
 }
 
-export default function MapContainer({ onMapMove }: MapContainerProps) {
+export default function MapContainer({ onMapMove, deviantHikers = [] }: MapContainerProps) {
   const [sharedView, setSharedView] = useState({ lat: 37.74, lon: -119.58, zoom: 11 });
   const [mapboxFlyTo, setMapboxFlyTo] = useState<{ lat: number; lon: number; zoom: number; v: number } | null>(null);
   const [layers, setLayers] = useState({
@@ -160,7 +163,9 @@ export default function MapContainer({ onMapMove }: MapContainerProps) {
   const [hikeStats, setHikeStats] = useState<HikeStats | null>(null);
   const [droneSearchActive, setDroneSearchActive] = useState(false);
   const [droneUpdate, setDroneUpdate] = useState<DroneSearchUpdate | null>(null);
+  const [alertDismissed, setAlertDismissed] = useState(false);
   const mapboxMapRef = useRef<mapboxgl.Map | null>(null);
+  const prevDeviantIdsRef = useRef<string>('');
   const hikeNodeIdxRef = useRef(0);
 
   const hotspots = usePredictHotspots(YOSEMITE_BBOX);
@@ -189,6 +194,15 @@ export default function MapContainer({ onMapMove }: MapContainerProps) {
   useEffect(() => {
     if (hybridRoute) setShowAnalysis(true);
   }, [hybridRoute]);
+
+  // Re-show alert when deviant set changes (new deviation cycle)
+  useEffect(() => {
+    const ids = deviantHikers.map(d => d.id).sort().join(',');
+    if (ids !== prevDeviantIdsRef.current) {
+      prevDeviantIdsRef.current = ids;
+      if (ids !== '') setAlertDismissed(false);
+    }
+  }, [deviantHikers]);
 
   useEffect(() => {
     const { west, south, east, north } = YOSEMITE_BBOX;
@@ -523,6 +537,7 @@ export default function MapContainer({ onMapMove }: MapContainerProps) {
           incidentData={allIncidentMarkers}
           droneSearchActive={droneSearchActive}
           onDroneUpdate={setDroneUpdate}
+          deviantHikers={deviantHikers.map(d => ({ id: d.id, name: d.name, lat: d.lat, lon: d.lon }))}
         />
       </div>
 
@@ -581,6 +596,14 @@ export default function MapContainer({ onMapMove }: MapContainerProps) {
             />
           </div>
         </div>
+      )}
+
+      {/* ── Hiker alert panel ─────────────────────────────────────────── */}
+      {deviantHikers.length > 0 && !alertDismissed && (
+        <HikerAlertPanel
+          deviants={deviantHikers}
+          onDismiss={() => setAlertDismissed(true)}
+        />
       )}
 
       {/* Computing spinner */}

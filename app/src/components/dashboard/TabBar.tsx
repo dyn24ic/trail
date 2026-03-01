@@ -2,6 +2,7 @@
 
 import dynamic from 'next/dynamic';
 import type { Tab } from '@/hooks/useTabs';
+import type { DeviantHiker } from '@/hooks/useHikerTracking';
 import IncidentDetailView from './views/IncidentDetailView';
 import AnalyticsView from './views/AnalyticsView';
 
@@ -13,9 +14,10 @@ const MapContainer = dynamic(() => import('./MapContainer'), {
 interface TabBarProps {
   tabs: { tabs: Tab[]; activeTabId: string; openTab: (t: Tab) => void; closeTab: (id: string) => void; setActiveTab: (id: string) => void };
   onMapMove?: (lat: number, lon: number) => void;
+  deviantHikers?: DeviantHiker[];
 }
 
-export default function TabBar({ tabs: tabState, onMapMove }: TabBarProps) {
+export default function TabBar({ tabs: tabState, onMapMove, deviantHikers = [] }: TabBarProps) {
   const { tabs, activeTabId, closeTab, setActiveTab } = tabState;
 
   return (
@@ -46,7 +48,7 @@ export default function TabBar({ tabs: tabState, onMapMove }: TabBarProps) {
       <div className="center-content">
         {/* Map is always mounted, hidden when not active */}
         <div style={{ display: activeTabId === 'map' ? 'block' : 'none', position: 'absolute', inset: 0 }}>
-          <MapContainer onMapMove={onMapMove} />
+          <MapContainer onMapMove={onMapMove} deviantHikers={deviantHikers} />
         </div>
 
         {/* Other tabs rendered only when active */}

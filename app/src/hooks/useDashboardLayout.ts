@@ -6,7 +6,7 @@ const STORAGE_KEY = 'trail_dashboard_layout_v3';
 
 export interface DashboardLayout {
   leftTab: 'fleet' | 'sensors' | 'weather';
-  rightTab: 'active' | 'ai';
+  rightTab: 'active' | 'ai' | 'hikers';
 }
 
 const DEFAULT_LAYOUT: DashboardLayout = {
