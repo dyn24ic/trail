@@ -9,7 +9,7 @@ import org.http4s.headers.{Authorization, `Content-Type`}
 import org.http4s.MediaType
 import org.http4s.ember.client.EmberClientBuilder
 import scala.util.Random
-import trail.domain.{InjuryTriage, ResponderRoute, RouteStep, Severity}
+import trail.domain.{InjuryTriage, InjuryType, ResponderRoute, RouteStep, Severity}
 
 import java.time.{Instant, ZoneOffset}
 
@@ -60,7 +60,7 @@ class ResponderRoutingService:
 
       val triageJson = Json.obj(
         "severity"                      -> Json.fromString(triage.severity.toString),
-        "injuryType"                    -> Json.fromString(triage.injuryType),
+        "injuryType"                    -> triage.injuryType.asJson,
         "consciousAndResponsive"        -> Json.fromBoolean(triage.consciousAndResponsive),
         "recommendedResponse"           -> Json.fromString(triage.recommendedResponse),
         "estimatedMedicalUrgencyMinutes" -> Json.fromInt(triage.estimatedMedicalUrgencyMinutes),

@@ -13,7 +13,7 @@ services:
   scala:
     build:
       context: ./backend
-      dockerfile: Dockerfile.scala
+      dockerfile: Dockerfile-scala
     ports:
       - "8080:8080"
     environment:

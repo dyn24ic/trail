@@ -2,20 +2,11 @@ package trail.services
 
 import cats.effect.IO
 import scala.util.Random
-import trail.domain.{InjuryTriage, Severity}
+import trail.domain.{InjuryTriage, InjuryType, Severity}
 
 class TriageService:
 
-  private val injuryTypes = List(
-    "Fractured limb",
-    "Head trauma",
-    "Hypothermia",
-    "Dehydration / heat exhaustion",
-    "Sprained ankle",
-    "Laceration",
-    "Cardiac event",
-    "Altitude sickness"
-  )
+  private val injuryTypes = InjuryType.values
 
   def assess(victimLat: Double, victimLng: Double): IO[InjuryTriage] = IO:
     val rng      = new Random()
