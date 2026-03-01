@@ -249,6 +249,71 @@ def get_hydro_conditions(bbox: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Wildfire incidents (WFIGS — National Interagency Fire Center)
+# ---------------------------------------------------------------------------
+
+# WFIGS is hosted on a different ArcGIS organisation than NPS
+_WFIGS_URL = (
+    "https://services3.arcgis.com/T4QMspbfLg3qTGWY/arcgis/rest/services"
+    "/WFIGS_Incident_Locations_Current/FeatureServer/0"
+)
+
+
+def get_wildfire_incidents(bbox: dict) -> dict:
+    """
+    Query the NIFC WFIGS active wildfire incident layer for fires within the bbox.
+
+    Returns:
+        count   int     number of active fires intersecting the bbox
+        fires   list    each entry: {lat, lon, name, acres, cause, discovered, contained_pct}
+    """
+    features = _spatial_query(
+        _WFIGS_URL,
+        bbox,
+        {
+            "outFields": (
+                "InitialLatitude,InitialLongitude,IncidentName,"
+                "FinalAcres,FireCause,FireDiscoveryDateTime,"
+                "IncidentTypeCategory,PercentContained"
+            ),
+            "resultRecordCount": 50,
+        },
+    )
+
+    fires = []
+    for f in features:
+        attr = f.get("attributes", {})
+        try:
+            lat = float(attr.get("InitialLatitude")  or 0)
+            lon = float(attr.get("InitialLongitude") or 0)
+        except (TypeError, ValueError):
+            continue
+        if lat == 0 and lon == 0:
+            continue
+
+        # Convert epoch-ms discovery date to ISO string
+        disc_raw = attr.get("FireDiscoveryDateTime")
+        if isinstance(disc_raw, (int, float)) and disc_raw > 0:
+            import datetime as _dt
+            discovered = _dt.datetime.utcfromtimestamp(disc_raw / 1000).strftime("%Y-%m-%dT%H:%MZ")
+        else:
+            discovered = str(disc_raw or "")
+
+        fires.append({
+            "lat":           round(lat, 5),
+            "lon":           round(lon, 5),
+            "name":          str(attr.get("IncidentName") or ""),
+            "acres":         float(attr.get("FinalAcres") or 0),
+            "cause":         str(attr.get("FireCause") or "Unknown"),
+            "type":          str(attr.get("IncidentTypeCategory") or "WF"),
+            "discovered":    discovered,
+            "contained_pct": float(attr.get("PercentContained") or 0),
+        })
+
+    return {"count": len(fires), "fires": fires}
+
+
+# ---------------------------------------------------------------------------
 # Road incidents
 # ---------------------------------------------------------------------------
 

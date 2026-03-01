@@ -1,12 +1,14 @@
 """
 Hotspot prediction service — main orchestrator.
 
-Fuses NPS ArcGIS data, Open-Meteo HRRR weather, and terrain/DEM data, then
-calls the active hotspot model to produce ranked accident hotspot zones.
+Fuses NPS ArcGIS data, Open-Meteo HRRR weather, terrain/DEM data, and WFIGS wildfire
+incidents, then calls a prediction model to produce ranked accident hotspot zones for
+the next 24 hours.
 
-Active model is controlled by ACTIVE_MODEL in hotspot_models.py.
-  - RandomHotspotModel (default): instant, no network calls, for dev/demo
-  - Future: swap in a real inference model by changing that one line
+Model priority:
+    1. Brev-hosted NVIDIA Nemotron fine-tune (BREV_INFERENCE_URL env var)
+    2. OpenAI gpt-4o (OPENAI_API_KEY env var, fallback if Brev unavailable)
+    3. Rules-based fallback (no external call)
 
 Public API:
     predict_hotspots(bbox: dict) -> dict   (HotspotPredictionResponse)
@@ -26,6 +28,7 @@ from .arcgis_service import (
     get_hydro_conditions,
     get_road_incidents,
     get_smoke_aqi,
+    get_wildfire_incidents,
 )
 from .elevation_service import (
     get_terrain_for_bbox,
@@ -34,21 +37,21 @@ from .elevation_service import (
 )
 from .hotspot_models import ACTIVE_MODEL, HotspotContext
 from .openmeteo_service import get_weather, weather_summary_string
+from . import xgboost_service as _xgb_svc
 
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # GPT model configuration (used by the legacy GPT pipeline helpers below)
 # ---------------------------------------------------------------------------
-# TODO: Update to "gpt-5.2" once that model is available in the OpenAI API.
-# Long-term plan: swap endpoint to NVIDIA Nemotron after fine-tuning on YOSE SAR data.
-AI_MODEL = "gpt-4o"
+AI_MODEL = "gpt-4o-mini"
+_GPT_MODEL_VERSION = f"trAIl-weather-v1.0+{AI_MODEL}"
 
 # Number of candidate points to evaluate across the bbox (grid_size² total)
 CANDIDATE_GRID_SIZE = 8
-# Top-N candidates (by composite score) sent to the GPT prompt
-TOP_CANDIDATES_FOR_GPT = 20
-# Maximum hotspots returned by GPT
+# Top-N candidates (by composite score) sent to the model prompt
+TOP_CANDIDATES_FOR_MODEL = 20
+# Maximum hotspots returned
 MAX_HOTSPOTS = 10
 
 # ---------------------------------------------------------------------------
@@ -96,41 +99,47 @@ def predict_hotspots(bbox: dict) -> dict:
         bbox, ACTIVE_MODEL.version,
     )
 
-    if ACTIVE_MODEL.needs_context:
-        # ── Full pipeline: fetch all env data then pass to model ──────────
-        raw     = _fetch_all_data(bbox)
-        logger.info("Fetching terrain data...")
-        terrain = get_terrain_for_bbox(bbox)
-        if terrain is None:
-            logger.warning("Terrain data unavailable — terrain scores will default to 0.5")
-        context = HotspotContext(
-            fire=raw["fire"],
-            weather=raw["weather"],
-            hydro=raw["hydro"],
-            roads=raw["roads"],
-            smoke_aqi=raw["smoke_aqi"],
-            terrain=terrain,
-        )
-    else:
-        # ── Fast path: skip all network calls ─────────────────────────────
-        raw     = {}
-        context = None
+    # ── Phase 1: Parallel data fetch ──────────────────────────────────────
+    raw = _fetch_all_data(bbox)
 
-    hotspots = ACTIVE_MODEL.predict(bbox, context)
+    # ── Phase 2: Terrain data (sequential — DEM fetch is already cached) ──
+    logger.info("Fetching terrain data...")
+    terrain = get_terrain_for_bbox(bbox)
+    if terrain is None:
+        logger.warning("Terrain data unavailable — terrain scores will default to 0.5")
 
-    weather = raw.get("weather") or {}
-    fire    = raw.get("fire")    or {}
+    # ── Phase 3: Candidate grid + numeric scoring ──────────────────────────
+    logger.info("Seeding and scoring %d candidate points...", CANDIDATE_GRID_SIZE ** 2)
+    candidates = seed_candidate_points(bbox, CANDIDATE_GRID_SIZE)
+    scored = score_candidates(
+        candidates,
+        terrain_data=terrain,
+        fire=raw["fire"],
+        weather=raw["weather"],
+        hydro=raw["hydro"],
+        road_incidents=raw["roads"],
+    )
+    top_candidates = scored[:TOP_CANDIDATES_FOR_MODEL]
+
+    # ── Phase 4: Model prediction (XGBoost → GPT-mini → fallback) ────────
+    hotspots, model_version = _run_model_prediction(bbox, raw, scored, top_candidates)
+
+    # ── Phase 5: Assemble response ─────────────────────────────────────────
+    weather   = raw["weather"]   or {}
+    fire      = raw["fire"]      or {}
+    wildfires = raw.get("wildfires") or {}
+    active_fires = wildfires.get("count", 0)
 
     return {
-        "hotspots":     hotspots,
-        "bbox":         bbox,
-        "generatedAt":  datetime.now(tz=timezone.utc).isoformat(),
-        "modelVersion": ACTIVE_MODEL.version,
+        "hotspots": hotspots,
+        "bbox": bbox,
+        "generatedAt": datetime.now(tz=timezone.utc).isoformat(),
+        "modelVersion": model_version,
         "conditions": {
             "fireDangerRating": fire.get("danger_rating", "UNKNOWN"),
-            "weatherSummary":   weather_summary_string(weather) if weather else "unavailable",
-            "activeFires":      0,
-            "smokeAqi":         raw.get("smoke_aqi"),
+            "weatherSummary": weather_summary_string(weather) if weather else "unavailable",
+            "activeFires": active_fires,
+            "smokeAqi": raw["smoke_aqi"],
         },
     }
 
@@ -148,16 +157,17 @@ def _fetch_all_data(bbox: dict) -> dict:
     center_lon = (bbox["west"]  + bbox["east"])  / 2
 
     tasks = {
-        "fire":      (get_fire_conditions, (bbox,)),
-        "smoke_aqi": (get_smoke_aqi,       (bbox,)),
-        "hydro":     (get_hydro_conditions,(bbox,)),
-        "roads":     (get_road_incidents,  (bbox,)),
-        "weather":   (get_weather,         (center_lat, center_lon)),
+        "fire":      (get_fire_conditions,   (bbox,)),
+        "smoke_aqi": (get_smoke_aqi,         (bbox,)),
+        "hydro":     (get_hydro_conditions,  (bbox,)),
+        "roads":     (get_road_incidents,    (bbox,)),
+        "weather":   (get_weather,           (center_lat, center_lon)),
+        "wildfires": (get_wildfire_incidents,(bbox,)),
     }
 
     results = {k: None for k in tasks}
 
-    with ThreadPoolExecutor(max_workers=5) as executor:
+    with ThreadPoolExecutor(max_workers=6) as executor:
         future_to_key = {
             executor.submit(fn, *args): key
             for key, (fn, args) in tasks.items()
@@ -173,50 +183,82 @@ def _fetch_all_data(bbox: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# GPT prediction
+# Model prediction  (XGBoost → GPT-4o-mini → rules-based fallback)
 # ---------------------------------------------------------------------------
 
-def _run_gpt_prediction(bbox: dict, raw: dict, top_candidates: list) -> list:
+def _run_model_prediction(
+    bbox: dict,
+    raw: dict,
+    all_scored_candidates: list,
+    top_candidates: list,
+) -> tuple[list, str]:
     """
-    Send pre-scored candidates and current conditions to GPT.
-    Falls back to a rules-based hotspot list if OpenAI is unavailable.
+    Run hotspot prediction via the best available model backend.
 
-    Uses response_format={"type": "json_object"} — same pattern as
-    routing/services/llm_service.py for consistency across the backend.
+    Priority:
+        1. XGBoost  (trained on historical incident data — gradient boosting over
+                     numeric features; no LLM needed)
+        2. OpenAI gpt-4o-mini  (lightweight LLM fallback when XGBoost models
+                                are not yet trained / deployed)
+        3. Rules-based fallback (always available)
+
+    Returns (hotspots_list, model_version_string).
     """
-    api_key = getattr(settings, "OPENAI_API_KEY", "")
-    if not api_key or api_key in ("sk-placeholder", ""):
-        logger.warning("No OpenAI key — using fallback hotspot analysis")
-        return _fallback_hotspots(top_candidates)
+    now = datetime.now(tz=timezone.utc)
 
+    # ── 1. XGBoost ────────────────────────────────────────────────────────
     try:
-        from openai import OpenAI
-        client = OpenAI(api_key=api_key)
-
-        system_prompt = _build_system_prompt()
-        user_prompt   = _build_user_prompt(bbox, raw, top_candidates)
-
-        response = client.chat.completions.create(
-            model=AI_MODEL,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user",   "content": user_prompt},
-            ],
-            response_format={"type": "json_object"},
-            temperature=0.2,   # low temperature for deterministic safety predictions
-            max_tokens=4096,
+        hotspots = _xgb_svc.predict(
+            scored_candidates=all_scored_candidates,
+            raw_conditions=raw,
+            bbox=bbox,
+            month=now.month,
+            hour_local=now.hour,
         )
-
-        content = response.choices[0].message.content
-        parsed = json.loads(content)
-        hotspots = parsed.get("hotspots", [])
-
-        # Validate and clamp all numeric fields
-        return [_validate_hotspot(h, i) for i, h in enumerate(hotspots[:MAX_HOTSPOTS])]
-
+        if hotspots is not None:
+            logger.info("XGBoost returned %d hotspots", len(hotspots))
+            return hotspots, "trAIl-weather-v1.1+xgboost"
     except Exception as exc:
-        logger.warning("OpenAI call failed: %s — using fallback hotspots", exc)
-        return _fallback_hotspots(top_candidates)
+        logger.warning("XGBoost inference error: %s — falling back to GPT", exc)
+
+    # ── 2. OpenAI GPT-4o-mini ─────────────────────────────────────────────
+    api_key = getattr(settings, "OPENAI_API_KEY", "")
+    if api_key and api_key not in ("sk-placeholder", ""):
+        try:
+            hotspots = _call_gpt(api_key, bbox, raw, top_candidates)
+            logger.info("GPT-4o-mini returned %d hotspots", len(hotspots))
+            return hotspots, _GPT_MODEL_VERSION
+        except Exception as exc:
+            logger.warning("OpenAI call failed: %s — using fallback hotspots", exc)
+
+    # ── 3. Rules-based fallback ───────────────────────────────────────────
+    logger.warning("No model available — using rules-based fallback hotspot analysis")
+    return _fallback_hotspots(top_candidates), "trAIl-weather-v1.0+rules"
+
+
+def _call_gpt(api_key: str, bbox: dict, raw: dict, top_candidates: list) -> list:
+    """Send pre-scored candidates and current conditions to GPT-4o-mini."""
+    from openai import OpenAI
+    client = OpenAI(api_key=api_key)
+
+    system_prompt = _build_system_prompt()
+    user_prompt   = _build_user_prompt(bbox, raw, top_candidates)
+
+    response = client.chat.completions.create(
+        model=AI_MODEL,
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user",   "content": user_prompt},
+        ],
+        response_format={"type": "json_object"},
+        temperature=0.2,
+        max_tokens=2048,
+    )
+
+    content = response.choices[0].message.content
+    parsed = json.loads(content)
+    hotspots = parsed.get("hotspots", [])
+    return [_validate_hotspot(h, i) for i, h in enumerate(hotspots[:MAX_HOTSPOTS])]
 
 
 def _build_system_prompt() -> str:
@@ -255,10 +297,22 @@ Output schema for each hotspot:
 
 
 def _build_user_prompt(bbox: dict, raw: dict, top_candidates: list) -> str:
-    weather = raw.get("weather") or {}
-    fire    = raw.get("fire")    or {}
-    hydro   = raw.get("hydro")   or {}
-    roads   = raw.get("roads")   or {}
+    weather   = raw.get("weather")   or {}
+    fire      = raw.get("fire")      or {}
+    hydro     = raw.get("hydro")     or {}
+    roads     = raw.get("roads")     or {}
+    wildfires = raw.get("wildfires") or {}
+
+    # Active fires summary
+    fire_list = wildfires.get("fires", [])
+    if fire_list:
+        fire_lines = "\n".join(
+            f"  • {f['name']} ({f['lat']:.4f}°N, {f['lon']:.4f}°W)"
+            f" — {f['acres']:.0f} ac, {f['contained_pct']:.0f}% contained"
+            for f in fire_list[:5]
+        )
+    else:
+        fire_lines = "  None reported"
 
     # Compact candidate table (top 20 by composite score)
     table_rows = []
@@ -285,6 +339,9 @@ Danger Rating: {fire.get('danger_rating', 'UNKNOWN')}
 Dispatch Level: {fire.get('dispatch_level', 'UNKNOWN')}
 No-campfire zone active: {fire.get('no_campfire_active', 'unknown')}
 
+### Active Wildfires (WFIGS / NIFC) — {wildfires.get('count', 0)} fires in region
+{fire_lines}
+
 ### Hydrology (Stream Gages)
 Flood alert: {hydro.get('flood_alert', 'unknown')}
 Severity: {hydro.get('flood_severity', 'unknown')}
@@ -304,6 +361,7 @@ Format: (lat, lon) | composite | fire weather terrain water access
 ## Task
 Identify the top accident hotspots (up to {MAX_HOTSPOTS}).
 Return a single JSON object: {{ "hotspots": [...] }}
+Each hotspot must include an "incidentType" field: one of fall | drowning | medical | vehicle | rockfall | lightning | search_rescue | fire_related | unknown.
 Select the most dangerous candidates and refine coordinates to align with real trail features.
 Apply the risk thresholds: low<0.35, moderate 0.35–0.55, high 0.55–0.75, extreme>0.75."""
 
@@ -311,6 +369,12 @@ Apply the risk thresholds: low<0.35, moderate 0.35–0.55, high 0.55–0.75, ext
 # ---------------------------------------------------------------------------
 # Validation helpers
 # ---------------------------------------------------------------------------
+
+_VALID_INCIDENT_TYPES = frozenset({
+    "fall", "drowning", "medical", "vehicle", "rockfall",
+    "lightning", "search_rescue", "fire_related", "unknown",
+})
+
 
 def _validate_hotspot(h: dict, idx: int) -> dict:
     """Ensure all required fields are present and numeric values are clamped."""
@@ -326,6 +390,10 @@ def _validate_hotspot(h: dict, idx: int) -> dict:
     if risk_level not in ("low", "moderate", "high", "extreme"):
         risk_level = _score_to_level(risk_score)
 
+    incident_type = h.get("incidentType", "unknown")
+    if incident_type not in _VALID_INCIDENT_TYPES:
+        incident_type = "unknown"
+
     return {
         "id":           h.get("id", f"HOTSPOT-{idx+1:03d}"),
         "lat":          float(h.get("lat", 37.76)),
@@ -333,6 +401,7 @@ def _validate_hotspot(h: dict, idx: int) -> dict:
         "radiusMeters": max(50, min(2000, int(h.get("radiusMeters", 400)))),
         "riskScore":    risk_score,
         "riskLevel":    risk_level,
+        "incidentType": incident_type,
         "factors": {
             "fire":          clamp(factors.get("fire", 0.5)),
             "weather":       clamp(factors.get("weather", 0.5)),
@@ -362,12 +431,24 @@ def _score_to_level(score: float) -> str:
 def _fallback_hotspots(top_candidates: list) -> list:
     """
     Generate simple hotspot objects from the top pre-scored candidates when
-    GPT is unavailable.  Produces up to 5 hotspots from the highest-scoring grid points.
+    no model is available.  Produces up to 5 hotspots from the highest-scoring grid points.
+    Uses terrain slope as a heuristic for incident type.
     """
     hotspots = []
     for i, c in enumerate(top_candidates[:5]):
         score = c["composite_score"]
         level = _score_to_level(score)
+        # Rough type heuristic from factor scores
+        if c.get("water_score", 0) >= 0.7:
+            incident_type = "drowning"
+        elif c.get("terrain_score", 0) >= 0.7:
+            incident_type = "fall"
+        elif c.get("fire_score", 0) >= 0.7:
+            incident_type = "fire_related"
+        elif c.get("access_score", 0) >= 0.5:
+            incident_type = "vehicle"
+        else:
+            incident_type = "unknown"
         hotspots.append({
             "id":           f"HOTSPOT-{i+1:03d}",
             "lat":          round(c["lat"], 6),
@@ -375,6 +456,7 @@ def _fallback_hotspots(top_candidates: list) -> list:
             "radiusMeters": 400,
             "riskScore":    score,
             "riskLevel":    level,
+            "incidentType": incident_type,
             "factors": {
                 "fire":          c["fire_score"],
                 "weather":       c["weather_score"],
@@ -384,7 +466,7 @@ def _fallback_hotspots(top_candidates: list) -> list:
             },
             "description": (
                 f"Elevated composite risk zone ({level.upper()}, score {score:.2f}). "
-                "Generated by rules-based fallback (GPT unavailable)."
+                "Generated by rules-based fallback (model unavailable)."
             ),
             "recommendations": [
                 "Increase patrol frequency in this zone",
