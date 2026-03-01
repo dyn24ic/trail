@@ -117,6 +117,7 @@ export default function DemoPage() {
   );
   const [advancingHiker, setAdvancingHiker] = useState<string | null>(null);
   const [resetting, setResetting] = useState(false);
+  const [firingLandslide, setFiringLandslide] = useState(false);
 
   // Poll all tracked incidents every 2 s
   const trackedRef = useRef(tracked);
@@ -248,6 +249,50 @@ export default function DemoPage() {
     }
   }
 
+  async function fireLandslide() {
+    setFiringLandslide(true);
+    setError(null);
+    const landslidePoints = [
+      { sensorId: 'S-MT-03', label: 'Vernal Fall area', lat: 37.7267, lng: -119.5448 },
+      { sensorId: 'S-PT-02', label: 'Panorama Cliff', lat: 37.7274, lng: -119.5530 },
+      { sensorId: 'S-ML-02', label: 'Mirror Lake North', lat: 37.7480, lng: -119.5410 },
+    ];
+    try {
+      for (const pt of landslidePoints) {
+        const res = await fetch('/api/incidents', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sensorId: pt.sensorId,
+            anomalyType: 'landslide',
+            lat: pt.lat,
+            lng: pt.lng,
+          }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.incidentId) {
+            setTracked(prev => [
+              {
+                id: data.incidentId,
+                kind: 'SensorAnomaly' as const,
+                location: `Landslide — ${pt.label}`,
+                detail: null,
+                loading: true,
+                expanded: false,
+              },
+              ...prev,
+            ]);
+          }
+        }
+      }
+    } catch {
+      setError('Could not reach the Scala backend — is it running on :8080?');
+    } finally {
+      setFiringLandslide(false);
+    }
+  }
+
   function toggleExpand(id: string) {
     setTracked(prev => prev.map(t => (t.id === id ? { ...t, expanded: !t.expanded } : t)));
   }
@@ -294,6 +339,50 @@ export default function DemoPage() {
                 onFire={() => fire(s)}
               />
             ))}
+          </div>
+
+          {/* Landslide scenario */}
+          <div style={{
+            marginTop: '20px',
+            background: 'rgba(239,68,68,0.04)',
+            border: '1px solid rgba(239,68,68,0.2)',
+            borderLeft: '3px solid #ef4444',
+            borderRadius: '4px',
+            padding: '20px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '20px',
+          }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '6px' }}>
+                <span style={{ fontSize: '10px', letterSpacing: '0.12em', textTransform: 'uppercase', color: '#ef4444', border: '1px solid #ef4444', padding: '2px 7px', borderRadius: '2px' }}>
+                  MULTI-INCIDENT
+                </span>
+                <span style={{ fontSize: '13px', fontWeight: 600 }}>Landslide Scenario</span>
+              </div>
+              <p style={{ fontSize: '13px', color: 'rgba(220,232,240,0.7)', margin: '0', lineHeight: 1.5 }}>
+                Triggers 3 simultaneous incidents at Vernal Fall, Panorama Cliff, and Mirror Lake — simulates a landslide event with multiple hikers missing.
+              </p>
+            </div>
+            <button
+              onClick={fireLandslide}
+              disabled={firingLandslide}
+              style={{
+                padding: '10px 24px',
+                background: firingLandslide ? 'rgba(255,255,255,0.05)' : 'rgba(239,68,68,0.12)',
+                border: `1px solid ${firingLandslide ? 'rgba(220,232,240,0.12)' : '#ef4444'}`,
+                color: firingLandslide ? 'rgba(220,232,240,0.35)' : '#ef4444',
+                borderRadius: '3px',
+                fontSize: '12px',
+                letterSpacing: '0.1em',
+                textTransform: 'uppercase',
+                cursor: firingLandslide ? 'not-allowed' : 'pointer',
+                whiteSpace: 'nowrap',
+                flexShrink: 0,
+              }}
+            >
+              {firingLandslide ? 'Triggering…' : '⚠ Trigger Landslide'}
+            </button>
           </div>
         </section>
 

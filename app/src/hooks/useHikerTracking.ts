@@ -36,6 +36,16 @@ export interface DeviantHiker {
   logEntries: LogEntry[];
 }
 
+/** Marker for showing any tracked hiker on the map (green = on-track, red = deviated) */
+export interface TrackedHikerMarker {
+  id: string;
+  name: string;
+  lat: number;
+  lon: number;
+  color: string;
+  deviated: boolean;
+}
+
 // Wall-clock display: offset from 09:00:00
 function formatTime(elapsedMs: number): string {
   const base = 9 * 3600; // 09:00:00 in seconds

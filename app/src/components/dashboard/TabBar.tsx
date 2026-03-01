@@ -2,7 +2,7 @@
 
 import dynamic from 'next/dynamic';
 import type { Tab } from '@/hooks/useTabs';
-import type { DeviantHiker } from '@/hooks/useHikerTracking';
+import type { DeviantHiker, TrackedHikerMarker } from '@/hooks/useHikerTracking';
 import IncidentDetailView from './views/IncidentDetailView';
 import AnalyticsView from './views/AnalyticsView';
 
@@ -15,9 +15,10 @@ interface TabBarProps {
   tabs: { tabs: Tab[]; activeTabId: string; openTab: (t: Tab) => void; closeTab: (id: string) => void; setActiveTab: (id: string) => void };
   onMapMove?: (lat: number, lon: number) => void;
   deviantHikers?: DeviantHiker[];
+  trackedHikerMarkers?: TrackedHikerMarker[];
 }
 
-export default function TabBar({ tabs: tabState, onMapMove, deviantHikers = [] }: TabBarProps) {
+export default function TabBar({ tabs: tabState, onMapMove, deviantHikers = [], trackedHikerMarkers = [] }: TabBarProps) {
   const { tabs, activeTabId, closeTab, setActiveTab } = tabState;
 
   return (
@@ -48,7 +49,7 @@ export default function TabBar({ tabs: tabState, onMapMove, deviantHikers = [] }
       <div className="center-content">
         {/* Map is always mounted, hidden when not active */}
         <div style={{ display: activeTabId === 'map' ? 'block' : 'none', position: 'absolute', inset: 0 }}>
-          <MapContainer onMapMove={onMapMove} deviantHikers={deviantHikers} />
+          <MapContainer onMapMove={onMapMove} deviantHikers={deviantHikers} trackedHikerMarkers={trackedHikerMarkers} />
         </div>
 
         {/* Other tabs rendered only when active */}
