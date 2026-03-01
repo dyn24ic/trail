@@ -20,7 +20,7 @@ object TriggerRoutes:
           Created(io.circe.Json.obj(
             "incidentId" -> incident.id.asJson,
             "status"     -> incident.status.asJson,
-            "message"    -> "Incident created. Pipeline running asynchronously.".asJson
+            "message"    -> "Incident created. Advance pipeline stages via POST /api/v1/incidents/:id/advance".asJson
           ))
         }
       }.handleErrorWith { err =>

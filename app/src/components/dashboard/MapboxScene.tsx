@@ -536,7 +536,13 @@ export default function MapboxScene({
 
       const features = hotspotData.hotspots.map((h) => ({
         type: "Feature" as const,
-        properties: { risk_score: h.riskScore, risk_level: h.riskLevel },
+        properties: {
+          risk_score: h.riskScore,
+          risk_level: h.riskLevel,
+          incident_type: h.incidentType ?? "unknown",
+          description: h.description,
+          recommendations: JSON.stringify(h.recommendations ?? []),
+        },
         geometry: { type: "Point" as const, coordinates: [h.lon, h.lat] },
       }));
 
@@ -564,6 +570,36 @@ export default function MapboxScene({
         },
         layout: { visibility: layersRef.current.hotspots ? "visible" : "none" },
       });
+
+      map.on("click", "hotspots-circle", (e) => {
+        const props = e.features?.[0]?.properties;
+        if (!props) return;
+        const recs: string[] = JSON.parse(props.recommendations ?? "[]");
+        const typeLabel = (props.incident_type as string).replace(/_/g, " ").toUpperCase();
+        const levelColor: Record<string, string> = {
+          extreme: "#ef4444", high: "#f97316", moderate: "#eab308", low: "#22c55e",
+        };
+        const col = levelColor[props.risk_level as string] ?? "#ff8c42";
+        new mapboxgl.Popup({ closeButton: true, maxWidth: "280px" })
+          .setLngLat(e.lngLat)
+          .setHTML(
+            `<div style="font-family:monospace;font-size:11px;color:#dce8f0;background:#0d1a23;padding:10px 12px;border-radius:4px;">
+              <div style="color:${col};font-size:12px;font-weight:700;margin-bottom:4px;">
+                ▲ ${props.risk_level?.toUpperCase()} RISK
+              </div>
+              <div style="color:#94a3b8;font-size:10px;margin-bottom:6px;">
+                Type: <span style="color:#fbbf24;">${typeLabel}</span>
+                &nbsp;·&nbsp;Score: ${(props.risk_score as number).toFixed(2)}
+              </div>
+              <div style="margin-bottom:6px;line-height:1.4;">${props.description}</div>
+              ${recs.length > 0 ? `<div style="color:#94a3b8;margin-bottom:3px;">Recommendations:</div>
+              <ul style="margin:0;padding-left:14px;">${recs.map(r => `<li style="margin-bottom:2px;">${r}</li>`).join("")}</ul>` : ""}
+            </div>`,
+          )
+          .addTo(map);
+      });
+      map.on("mouseenter", "hotspots-circle", () => { map.getCanvas().style.cursor = "pointer"; });
+      map.on("mouseleave", "hotspots-circle", () => { map.getCanvas().style.cursor = ""; });
     };
 
     if (map.isStyleLoaded()) addHotspots();

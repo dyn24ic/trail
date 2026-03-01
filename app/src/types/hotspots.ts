@@ -5,6 +5,7 @@ export interface HotspotZone {
   radiusMeters: number;
   riskScore: number;
   riskLevel: 'low' | 'moderate' | 'high' | 'extreme';
+  incidentType?: string;
   factors: {
     fire: number;
     weather: number;

@@ -1,14 +1,20 @@
 package trail.routes
 
 import cats.effect.IO
+import io.circe.generic.semiauto.*
 import io.circe.syntax.*
 import org.http4s.*
 import org.http4s.circe.*
 import org.http4s.dsl.io.*
-import trail.domain.{AmbulanceReport, Incident, IncidentReport, IncidentSummary, PoliceReport}
+import trail.domain.{AmbulanceReport, Incident, IncidentReport, IncidentSummary, IncidentStatus, PoliceReport}
 import trail.services.IncidentService
 
 object IncidentRoutes:
+
+  private case class StatusUpdate(status: IncidentStatus)
+  private object StatusUpdate:
+    given io.circe.Decoder[StatusUpdate] = deriveDecoder
+    given EntityDecoder[IO, StatusUpdate] = jsonOf[IO, StatusUpdate]
 
   given EntityDecoder[IO, PoliceReport]    = jsonOf[IO, PoliceReport]
   given EntityDecoder[IO, AmbulanceReport] = jsonOf[IO, AmbulanceReport]
@@ -58,6 +64,24 @@ object IncidentRoutes:
       }.handleErrorWith { err =>
         BadRequest(io.circe.Json.obj("error" -> err.getMessage.asJson))
       }
+
+    case req @ PATCH -> Root / "api" / "v1" / "incidents" / id / "status" =>
+      req.decode[StatusUpdate] { body =>
+        service.updateStatus(id, body.status).flatMap:
+          case Some(inc) => Ok(io.circe.Json.obj(
+            "id"        -> inc.id.asJson,
+            "status"    -> inc.status.asJson,
+            "updatedAt" -> inc.updatedAt.asJson
+          ))
+          case None => NotFound(io.circe.Json.obj("error" -> s"Incident $id not found".asJson))
+      }.handleErrorWith { err =>
+        BadRequest(io.circe.Json.obj("error" -> err.getMessage.asJson))
+      }
+
+    case POST -> Root / "api" / "v1" / "incidents" / id / "advance" =>
+      service.advanceStage(id).flatMap:
+        case Some(inc) => Ok(inc.asJson)
+        case None      => NotFound(io.circe.Json.obj("error" -> s"Incident $id not found".asJson))
 
     case POST -> Root / "api" / "v1" / "incidents" / id / "ai-recommendation" =>
       service.generateAiRecommendation(id).flatMap:

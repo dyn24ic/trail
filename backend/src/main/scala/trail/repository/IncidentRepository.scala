@@ -107,6 +107,13 @@ class IncidentRepository(xa: Transactor[IO]):
       .transact(xa)
       .map(_.map(fromRow))
 
+  def patchStatus(id: String, newStatus: IncidentStatus, updatedAt: String): IO[Boolean] =
+    val statusStr = newStatus.toString
+    sql"""
+      UPDATE incidents SET status = $statusStr, updated_at = $updatedAt
+      WHERE id = $id
+    """.update.run.transact(xa).map(_ > 0)
+
   def updateFull(incident: Incident): IO[Unit] =
     val statusStr = incident.status.toString
     sql"""
