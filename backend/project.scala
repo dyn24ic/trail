@@ -1,6 +1,7 @@
 //> using scala "3.8.2"
 
 //> using dep "org.http4s::http4s-ember-server:0.23.33"
+//> using dep "org.http4s::http4s-ember-client:0.23.33"
 //> using dep "org.http4s::http4s-circe:0.23.33"
 //> using dep "org.http4s::http4s-dsl:0.23.33"
 //> using dep "org.tpolecat::doobie-core:1.0.0-RC5"

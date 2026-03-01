@@ -5,7 +5,7 @@ import mapboxgl from 'mapbox-gl';
 import { useRef, useEffect, useCallback } from 'react';
 import { YOSEMITE_BBOX } from '@/data/trailBbox';
 import { YOSEMITE_BOUNDARY, WORLD_RING } from '@/data/yosemiteBoundary';
-import type { DangerZone } from '@/types/backend';
+import type { DangerZone, HybridRoute } from '@/types/backend';
 import type { HotspotPredictionResponse } from '@/types/hotspots';
 
 interface MapboxSceneProps {
@@ -21,6 +21,7 @@ interface MapboxSceneProps {
   };
   dangerZones: DangerZone[];
   hotspotData: HotspotPredictionResponse | null;
+  hybridRoute?: HybridRoute | null;
   onMove?: (lat: number, lon: number, zoom: number) => void;
   boxZoomMode?: boolean;
   flyTo?: { lat: number; lon: number; zoom: number; v: number } | null;
